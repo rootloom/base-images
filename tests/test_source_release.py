@@ -33,6 +33,11 @@ def raw(cpe, cve=None, severity='Low'):
 
 
 class SourceReleaseTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ, SOURCE_HANDOFF='')
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def test_draft_snapshot_restore_checks_identity_assets_and_database(self):
         env = dict(GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='2', GITHUB_SHA=HASH)
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env), patch.object(source, 'run') as run:
