@@ -4,9 +4,9 @@
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "debian-slim",
       "last_attempt": {
-        "finished_at": "2026-10-10T14:53:52.569526+00:00",
-        "status": "failed",
-        "url": "https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38061232422-1"
+        "finished_at": "2026-10-10T16:28:03.694171+00:00",
+        "status": "passed",
+        "url": "https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38067099299-1"
       },
       "platforms": {},
       "registry": "ghcr.io/rootloom/debian-slim",
@@ -16,9 +16,9 @@
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "ubi-minimal",
       "last_attempt": {
-        "finished_at": "2026-10-10T14:53:07.162739+00:00",
+        "finished_at": "2026-10-10T16:27:12.282189+00:00",
         "status": "passed",
-        "url": "https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38061232422-1"
+        "url": "https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38067099299-1"
       },
       "platforms": {},
       "registry": "ghcr.io/rootloom/ubi-minimal",
@@ -28,9 +28,9 @@
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "alpine",
       "last_attempt": {
-        "finished_at": "2026-10-10T14:54:02.102147+00:00",
-        "status": "failed",
-        "url": "https://github.com/rootloom/base-images/releases/tag/standard-alpine-38061232422-1"
+        "finished_at": "2026-10-10T16:28:24.480741+00:00",
+        "status": "passed",
+        "url": "https://github.com/rootloom/base-images/releases/tag/standard-alpine-38067099299-1"
       },
       "platforms": {},
       "registry": "ghcr.io/rootloom/alpine",
@@ -40,9 +40,9 @@
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "ubuntu",
       "last_attempt": {
-        "finished_at": "2026-10-10T14:56:34.811231+00:00",
+        "finished_at": "2026-10-10T16:30:28.458323+00:00",
         "status": "passed",
-        "url": "https://github.com/rootloom/base-images/releases/tag/standard-ubuntu-38061232422-1"
+        "url": "https://github.com/rootloom/base-images/releases/tag/standard-ubuntu-38067099299-1"
       },
       "platforms": {},
       "registry": "ghcr.io/rootloom/ubuntu",
@@ -52,9 +52,9 @@
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "rocky-minimal",
       "last_attempt": {
-        "finished_at": "2026-10-10T14:57:12.836537+00:00",
+        "finished_at": "2026-10-10T16:30:47.852414+00:00",
         "status": "passed",
-        "url": "https://github.com/rootloom/base-images/releases/tag/standard-rocky-minimal-38061232422-1"
+        "url": "https://github.com/rootloom/base-images/releases/tag/standard-rocky-minimal-38067099299-1"
       },
       "platforms": {},
       "registry": "ghcr.io/rootloom/rocky-minimal",
@@ -64,6 +64,11 @@
       "coverage": "NVD-CPE component matching only; not distribution advisory coverage",
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "source-minimal",
+      "last_attempt": {
+        "finished_at": "2026-10-10T16:38:53.590625+00:00",
+        "status": "blocked",
+        "url": "https://github.com/rootloom/base-images/releases/tag/source-source-minimal-38067099244-1"
+      },
       "platforms": {},
       "registry": "ghcr.io/rootloom/source-minimal",
       "state": "unverified"
