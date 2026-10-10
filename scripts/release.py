@@ -16,7 +16,8 @@ IMAGES = ('debian-slim', 'ubi-minimal', 'alpine', 'ubuntu', 'rocky-minimal')
 ARCHES = ('amd64', 'arm64')
 SMOKE = ('set -eu; test "$(id -u)" = 65532; test "$(id -g)" = 65532; '
          'test "$PWD" = /app; test -w /app; test -w /home/rootloom; '
-         'test -s /etc/ssl/certs/ca-certificates.crt; '
+         '(test -s /etc/ssl/certs/ca-certificates.crt || '
+         'test -s /etc/pki/tls/certs/ca-bundle.crt); '
          'touch /app/.smoke; rm /app/.smoke')
 
 
