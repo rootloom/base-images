@@ -31,31 +31,31 @@ Reports cover known vulnerabilities at scan time. Older digests are not rescanne
 ### debian-slim
 
 - Live index digest: `unknown`
-- Last attempt qualification: passed, 2026-10-10T17:32:23.466058+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38071969921-1)
+- Last attempt qualification: passed, 2026-10-10T19:04:50.216386+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38078189671-1)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 
 ### ubi-minimal
 
 - Live index digest: `unknown`
-- Last attempt qualification: passed, 2026-10-10T17:31:37.682590+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38071969921-1)
+- Last attempt qualification: passed, 2026-10-10T19:03:52.162610+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38078189671-1)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 
 ### alpine
 
 - Live index digest: `unknown`
-- Last attempt qualification: passed, 2026-10-10T17:32:37.555936+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-alpine-38071969921-1)
+- Last attempt qualification: passed, 2026-10-10T19:04:51.169727+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-alpine-38078189671-1)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 
 ### ubuntu
 
 - Live index digest: `unknown`
-- Last attempt qualification: passed, 2026-10-10T17:34:47.129112+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-ubuntu-38071969921-1)
+- Last attempt qualification: passed, 2026-10-10T19:07:18.668492+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-ubuntu-38078189671-1)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 
 ### rocky-minimal
 
 - Live index digest: `unknown`
-- Last attempt qualification: passed, 2026-10-10T17:35:06.171407+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-rocky-minimal-38071969921-1)
+- Last attempt qualification: passed, 2026-10-10T19:07:55.478823+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-rocky-minimal-38078189671-1)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 
 ### source-minimal
