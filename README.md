@@ -153,14 +153,14 @@ See [Latest Images](latest.md) for digests, scan times, sizes, packages, and fai
 <!-- image-status:start -->
 | Image | Arch | Latest Status | Critical | High | Medium | Low | Unknown | Scan (UTC) | Evidence |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| debian-slim | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
-| debian-slim | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
-| ubi-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
-| ubi-minimal | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
-| alpine | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
-| alpine | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
-| ubuntu | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
-| ubuntu | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| debian-slim | amd64 | registry-verified | 0 | 43 | 58 | 60 | 1 | 2026-10-10T14:43:46.850333+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38060528323-1) |
+| debian-slim | arm64 | registry-verified | 0 | 43 | 58 | 60 | 1 | 2026-10-10T14:43:46.850333+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38060528323-1) |
+| ubi-minimal | amd64 | registry-verified | 0 | 12 | 102 | 75 | 0 | 2026-10-10T14:43:46.701539+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38060528323-1) |
+| ubi-minimal | arm64 | registry-verified | 0 | 12 | 104 | 77 | 0 | 2026-10-10T14:43:46.701539+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38060528323-1) |
+| alpine | amd64 | registry-verified | 0 | 0 | 0 | 0 | 0 | 2026-10-10T14:45:04.622324+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-alpine-38060528323-1) |
+| alpine | arm64 | registry-verified | 0 | 0 | 0 | 0 | 0 | 2026-10-10T14:45:04.622324+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-alpine-38060528323-1) |
+| ubuntu | amd64 | registry-verified | 0 | 0 | 9 | 4 | 0 | 2026-10-10T14:46:13.465784+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-ubuntu-38060528323-1) |
+| ubuntu | arm64 | registry-verified | 0 | 0 | 9 | 4 | 0 | 2026-10-10T14:46:13.465784+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-ubuntu-38060528323-1) |
 | rocky-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
 | rocky-minimal | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
 | source-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
