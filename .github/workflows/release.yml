@@ -1,0 +1,63 @@
+name: Standard image release
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '19 4 * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: standard-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.repository == 'rootloom/base-images' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        image: [debian-slim, ubi-minimal, alpine, ubuntu, rocky-minimal]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          cache-image: false
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          version: v0.25.0
+          cache-binary: false
+          driver-opts: image=moby/buildkit@sha256:ddd1ca44b21eda906e81ab14a3d467fa6c39cd73b9a39df1196210edcb8db59e
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+        with:
+          cosign-release: v2.5.0
+      - name: Install checksum-pinned scanner in runner temporary directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz -o "$RUNNER_TEMP/trivy.tar.gz"
+          printf '%s  %s\n' c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f "$RUNNER_TEMP/trivy.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP" trivy
+          printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: python3 -m unittest discover -s tests -v
+      - name: Build, qualify, publish evidence, sign, and promote
+        run: python3 scripts/release.py release "$IMAGE"
+        env:
+          IMAGE: ${{ matrix.image }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Retain diagnostic evidence briefly
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: evidence-${{ matrix.image }}-${{ github.run_attempt }}
+          path: evidence/
+          retention-days: 1
+          if-no-files-found: ignore
