@@ -1,0 +1,140 @@
+name: Source image release
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/source-minimal/**
+      - scripts/source_release.py
+      - scripts/release.py
+      - tests/test_source*.py
+      - .github/workflows/source-release.yml
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions: {}
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  SOURCE_HANDOFF: release
+concurrency:
+  group: source-release
+  cancel-in-progress: false
+jobs:
+  check:
+    if: github.repository == 'rootloom/base-images' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -v
+      - name: Install pinned scanner in disposable runner temporary directory
+        run: python3 scripts/source_release.py install-scanner
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        with:
+          version: v0.25.0
+          cache-binary: false
+          driver-opts: image=moby/buildkit@sha256:ddd1ca44b21eda906e81ab14a3d467fa6c39cd73b9a39df1196210edcb8db59e
+      - id: check
+        name: Check source lock, fresh database, controls, and refresh inputs
+        run: python3 scripts/source_release.py check
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: always() && steps.check.outputs.skip != 'true'
+        name: Stage run-scoped draft evidence outside Actions storage
+        run: python3 scripts/source_release.py stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+  native:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Restore checksum-verified scanner snapshot and source inputs
+        run: python3 scripts/source_release.py restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: python3 scripts/source_release.py install-scanner
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        with:
+          version: v0.25.0
+          cache-binary: false
+          driver-opts: image=moby/buildkit@sha256:ddd1ca44b21eda906e81ab14a3d467fa6c39cd73b9a39df1196210edcb8db59e
+      - name: Authenticate candidate upload only
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Repeat compile, verify exact digest, and scan source components
+        run: python3 scripts/source_release.py build --arch "$ARCH"
+        env:
+          ARCH: ${{ matrix.arch }}
+      - if: always()
+        name: Stage one source bundle and native JSON evidence
+        run: python3 scripts/source_release.py stage --arch "$ARCH"
+        env:
+          ARCH: ${{ matrix.arch }}
+          GH_TOKEN: ${{ github.token }}
+  evidence:
+    needs: [check, native]
+    if: always() && github.repository == 'rootloom/base-images' && github.ref == 'refs/heads/main' && needs.check.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Restore verified preflight evidence
+        continue-on-error: true
+        run: python3 scripts/source_release.py restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Restore verified amd64 evidence
+        continue-on-error: true
+        run: python3 scripts/source_release.py restore --arch amd64
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Restore verified arm64 evidence
+        continue-on-error: true
+        run: python3 scripts/source_release.py restore --arch arm64
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        with:
+          version: v0.25.0
+          cache-binary: false
+          driver-opts: image=moby/buildkit@sha256:ddd1ca44b21eda906e81ab14a3d467fa6c39cd73b9a39df1196210edcb8db59e
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159
+        with:
+          cosign-release: v2.5.0
+      - name: Authenticate release operations
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish blocked evidence or sign and promote qualified source bytes
+        run: python3 scripts/source_release.py publish
+        env:
+          GH_TOKEN: ${{ github.token }}

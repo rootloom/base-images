@@ -2,4 +2,5 @@ __pycache__/
 *.pyc
 .trivy-cache/
 evidence/
+source-evidence/
 dist/

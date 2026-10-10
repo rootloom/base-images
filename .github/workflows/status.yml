@@ -1,7 +1,7 @@
 name: Public image status
 on:
   workflow_run:
-    workflows: [Standard image release]
+    workflows: [Standard image release, Source image release]
     types: [completed]
     branches: [main]
   workflow_dispatch:

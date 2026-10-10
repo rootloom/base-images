@@ -19,6 +19,10 @@ redistribution review before publication.
 
 ## Image Contract
 
+The five distribution images below use upstream binary images. They are not
+source rebuilds. The separate source-build track does not replace them or
+claim their distribution compatibility.
+
 - Images use the non-root user `rootloom`, with UID and GID `65532`.
 - `/app` and `/home/rootloom` are writable by that user.
 - Images include CA certificates and a shell. They keep package metadata for scans.
@@ -56,6 +60,66 @@ make each package public before community release. Anonymous pulls must work
 before supported tags are promoted. GitHub Release evidence is public because
 this repository is public.
 
+## Source Builds
+
+The `source-minimal` track builds a custom runtime from source and uses
+`FROM scratch` for the final image. It is not Debian, Alpine, Ubuntu, UBI,
+or Rocky Linux. It does not provide their package managers or compatibility
+contracts. It does not claim FIPS validation.
+
+This track is experimental and is not release-qualified. Its reviewed lock
+includes musl, BusyBox, compiler-rt builtins, and CA trust data. Scanner coverage
+currently supports musl and BusyBox through limited NVD-CPE matching.
+Compiler-rt builtins coverage remains unresolved and blocks promotion.
+Current component matches also block the vulnerability policy. Do not treat
+an experimental candidate as a supported release.
+
+Revision `r2` pins and applies the upstream musl `CVE-2026-40200` patch.
+Local arm64 tests and repeat builds support development only. Community release
+requires hosted qualification and public image evidence. BusyBox affected-code
+review, compiler-rt coverage, and native worker enforcement remain unfinished.
+No finding was suppressed. Experimental source work does not prevent independent
+standard image releases.
+
+The factory must publish reviewed changes to this repository and use GitHub
+Actions for release builds. Local-only results are not accepted delivery.
+Delivery requires anonymous GHCR access by digest and matching public CVE
+manifests, SBOMs, quality results, and signatures. Failed publication remains
+unfinished work until the public delivery checks pass.
+
+The source-build contract requires these controls:
+
+- Pin source archive URLs, versions, checksums, and licenses in a reviewed lock file.
+- Disclose the digest-pinned bootstrap compiler image. This is not a full compiler bootstrap.
+- Fetch inputs before compilation. Compile without network access.
+- Copy only required runtime files into the scratch image. Exclude build tools.
+- Test the non-root runtime on both architectures.
+- Compare repeated build outputs before promotion. Record the comparison in evidence.
+- Publish source inventory, source archives, licenses, SBOMs, and component CVE reports.
+- Test scanner coverage with known vulnerable component versions. Missing coverage blocks promotion.
+- Verify public access, signatures, and exact digests before moving version and `latest` tags.
+
+An empty OS scan does not prove that source-built components have no CVEs.
+Component reports describe known findings and scanner coverage, not a security guarantee.
+Source changes need reviewed lock updates. A scheduled rebuild cannot safely adopt
+a new source checksum without checking its origin.
+
+`Source image release` checks the lock, build inputs, and fresh scanner database
+every 15 minutes. It uses native amd64 and arm64 runners. Unchanged, measured
+attempts can skip repeat builds until the daily refresh. A blocked attempt never
+justifies a promotion claim. Public reports retain unknown coverage and raw findings.
+The status page reads source evidence separately from distribution reports.
+
+Source jobs transfer checksum-verified evidence through a run-scoped draft
+GitHub Release, not Actions artifacts. Each architecture uploads one source
+bundle. The final job removes the temporary scanner database before public
+publication. Failed or blocked evidence does not authorize tag promotion.
+
+Source-building the five distributions is separate work. Copying their binary
+packages into a scratch image is root filesystem assembly, not source compilation.
+Do not use source-build labels for those images until their complete build inputs
+and release checks support the claim.
+
 ## Current CVEs
 
 The table updates automatically from public evidence and the live `latest` digests.
@@ -77,6 +141,8 @@ See [Latest Images](latest.md) for digests, scan times, sizes, packages, and fai
 | ubuntu | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
 | rocky-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
 | rocky-minimal | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| source-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| source-minimal | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
 <!-- image-status:end -->
 
 ## Version Control

@@ -1,0 +1,42 @@
+name: Source image pull request
+on:
+  pull_request:
+    paths:
+      - images/source-minimal/**
+      - scripts/source_release.py
+      - scripts/release.py
+      - tests/test_source*.py
+      - .github/workflows/source-*.yml
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+concurrency:
+  group: source-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -v
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        with:
+          version: v0.25.0
+          cache-binary: false
+          driver-opts: image=moby/buildkit@sha256:ddd1ca44b21eda906e81ab14a3d467fa6c39cd73b9a39df1196210edcb8db59e
+      - name: Native source compile, actual repeat checksum, and restricted runtime smoke
+        run: python3 scripts/source_release.py pr --arch "$ARCH"
+        env:
+          ARCH: ${{ matrix.arch }}

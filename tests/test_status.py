@@ -129,6 +129,60 @@ class StatusTests(unittest.TestCase):
             self.assertTrue(first.startswith('Before\n'))
             self.assertTrue(first.endswith('\nAfter\n'))
 
+    def test_source_missing_latest_is_unknown_with_coverage_limit(self):
+        with patch.object(status, 'IMAGES', ()), patch.object(status, 'inspect', side_effect=RuntimeError('missing')):
+            snapshot = status.collect('rootloom/base-images', [])
+        record = snapshot['images'][0]
+        self.assertEqual(record['image'], 'source-minimal')
+        self.assertEqual(record['state'], 'unverified')
+        self.assertEqual(record['platforms'], {})
+        self.assertIn('NVD-CPE', record['coverage'])
+        self.assertIn('| ? | ? | ? | ? | ? |', status.table(snapshot))
+
+    def test_source_manifest_checksum_and_tag(self):
+        entry = {'tag_name': 'source-source-minimal-1-1'}
+        value = {'schema_version': 1, 'variant': 'source', 'source_repository': 'rootloom/base-images'}
+        raw = json.dumps(value).encode()
+        sums = (hashlib.sha256(raw).hexdigest() + '  manifest.json\n').encode()
+        with patch.object(status, 'asset', side_effect=[raw, sums]):
+            self.assertEqual(status.manifest('rootloom/base-images', entry), value)
+
+    def test_source_status_requires_promotion_lock_and_source_policy(self):
+        entry, value, _, index = self.evidence()
+        registry = 'ghcr.io/rootloom/source-minimal'
+        entry.update(tag_name='source-source-minimal-1-1', assets=[{'name': 'promotion.json'}])
+        lock = {'schema_version': 1}
+        lock_bytes = json.dumps(lock).encode()
+        report = {'components': [{'report': {'matches': [{'vulnerability': {'severity': 'Negligible'}}]}}]}
+        data = json.dumps(report).encode()
+        value.update(image=registry, variant='source', version_tag='source-1-1', supported_version_tag='musl-1.2.6-busybox-1.36.1-r1',
+                     scanner={'name': 'Grype', 'version': '0.120.1'})
+        value['assets'] = {arch + '.cve.json': {'sha256': hashlib.sha256(data).hexdigest()} for arch in status.ARCHES}
+        value['assets']['sources.lock.json'] = {'sha256': hashlib.sha256(lock_bytes).hexdigest()}
+        raw = json.dumps(value).encode()
+        promotion = {key: value[key] for key in ('image', 'index_digest', 'version_tag', 'supported_version_tag')}
+        promotion.update(status='promoted', manifest_sha256=hashlib.sha256(raw).hexdigest())
+
+        def public(repo, tag, name):
+            return {'promotion.json': json.dumps(promotion).encode(), 'manifest.json': raw,
+                    'sources.lock.json': lock_bytes}.get(name, data)
+
+        with patch.object(status, 'IMAGES', ()), patch.object(status, 'manifest', return_value=value), \
+                patch.object(status, 'asset', side_effect=public), patch.object(status, 'inspect', return_value=(DIGEST, index)), \
+                patch('source_release.source_policy', return_value=[]) as validate:
+            record = status.collect('rootloom/base-images', [entry])['images'][0]
+            self.assertEqual(record['state'], 'promotion-confirmed')
+            self.assertEqual(record['platforms']['amd64']['severity_counts']['LOW'], 1)
+            validate.assert_called_with(report, lock, registry + '@' + DIGEST)
+            validate.return_value = ['CVE-BLOCKED']
+            self.assertEqual(status.collect('rootloom/base-images', [entry])['images'][0]['platforms'], {})
+            validate.return_value = []
+            entry['assets'] = []
+            self.assertEqual(status.collect('rootloom/base-images', [entry])['images'][0]['state'], 'unverified')
+            entry['assets'] = [{'name': 'promotion.json'}]
+            value['assets']['sources.lock.json']['sha256'] = '0' * 64
+            self.assertEqual(status.collect('rootloom/base-images', [entry])['images'][0]['platforms'], {})
+
 
 if __name__ == '__main__':
     unittest.main()

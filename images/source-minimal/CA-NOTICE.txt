@@ -1,0 +1,6 @@
+The Mozilla CA bundle is available under the Mozilla Public License, v. 2.0.
+Obtain the license at https://mozilla.org/MPL/2.0/.
+The unmodified PEM data is in /etc/ssl/certs/ca-certificates.crt.
+Each release must provide the same data in its corresponding-source archive.
+Source: https://curl.se/ca/cacert-2026-09-25.pem
+Curl's conversion does not preserve Firefox certificate name constraints.

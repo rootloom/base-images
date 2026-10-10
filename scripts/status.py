@@ -27,7 +27,7 @@ def asset(repo, tag, name):
 
 def manifest(repo, entry):
     tag = entry['tag_name']
-    if not re.fullmatch(r'standard-(?:' + '|'.join(IMAGES) + r')-[0-9]+-[0-9]+', tag):
+    if not re.fullmatch(r'(?:standard-(?:' + '|'.join(IMAGES) + r')|source-source-minimal)-[0-9]+-[0-9]+', tag):
         raise ValueError('Unexpected evidence tag')
     data = asset(repo, tag, 'manifest.json')
     checksums = asset(repo, tag, 'SHA256SUMS').decode().splitlines()
@@ -53,11 +53,15 @@ def report_counts(report, ref):
 
 def collect(repo, entries):
     records = []
-    for image in IMAGES:
+    for image in (*IMAGES, 'source-minimal'):
+        source = image == 'source-minimal'
+        prefix = ('source-' if source else 'standard-') + image + '-'
         registry = 'ghcr.io/rootloom/' + image
         record = {'image': image, 'registry': registry, 'state': 'unverified', 'platforms': {}}
+        if source:
+            record['coverage'] = 'NVD-CPE component matching only; not distribution advisory coverage'
         records.append(record)
-        releases = [entry for entry in entries if entry['tag_name'].startswith('standard-' + image + '-')
+        releases = [entry for entry in entries if entry['tag_name'].startswith(prefix)
                     and not entry.get('draft')]
         try:
             if releases:
@@ -86,6 +90,14 @@ def collect(repo, entries):
             if matched is None:
                 raise ValueError('No qualified evidence matches latest')
             entry, value = matched
+            source_lock = None
+            if source:
+                if value['variant'] != 'source':
+                    raise ValueError('Unexpected source variant')
+                lock_bytes = asset(repo, entry['tag_name'], 'sources.lock.json')
+                if hashlib.sha256(lock_bytes).hexdigest() != value['assets']['sources.lock.json']['sha256']:
+                    raise ValueError('Source lock checksum mismatch')
+                source_lock = json.loads(lock_bytes)
             record['promotion_confirmed'] = False
             if any(item['name'] == 'promotion.json' for item in entry.get('assets', [])):
                 promotion = json.loads(asset(repo, entry['tag_name'], 'promotion.json'))
@@ -96,9 +108,11 @@ def collect(repo, entries):
                     if promotion[key] != value[key]:
                         raise ValueError('Promotion does not match live evidence')
                 record['promotion_confirmed'] = True
+            if source and not record['promotion_confirmed']:
+                raise ValueError('Source publication requires confirmed promotion')
             record.update(evidence_url=f'https://github.com/{repo}/releases/tag/{entry["tag_name"]}', scan_finished_at=value['finished_at'],
                           source_commit=value['source_commit'], version_tag=value['version_tag'],
-                          supported_version_tag=value['supported_version_tag'], upstream=value['upstream'],
+                          supported_version_tag=value['supported_version_tag'], upstream=value.get('upstream'),
                           scanner=value['scanner'])
             for arch in ARCHES:
                 platform = value['platforms'][arch]
@@ -109,7 +123,22 @@ def collect(repo, entries):
                 data = asset(repo, entry['tag_name'], name)
                 if hashlib.sha256(data).hexdigest() != value['assets'][name]['sha256']:
                     raise ValueError('CVE report checksum mismatch')
-                counts, blocked = report_counts(json.loads(data), registry + '@' + children[arch])
+                report = json.loads(data)
+                if source:
+                    from source_release import source_policy
+                    blocked = source_policy(report, source_lock, registry + '@' + children[arch])
+                    counts = dict.fromkeys(SEVERITIES, 0)
+                    for component in report['components']:
+                        for match in component['report']['matches']:
+                            severity = match['vulnerability']['severity'].upper()
+                            if severity == 'NEGLIGIBLE':
+                                severity = 'LOW'
+                            if severity not in counts:
+                                raise ValueError('Unknown source severity')
+                            counts[severity] += 1
+                    blocked = len(blocked)
+                else:
+                    counts, blocked = report_counts(report, registry + '@' + children[arch])
                 if blocked:
                     raise ValueError('Current report fails release policy')
                 record['platforms'][arch] = {'digest': children[arch], 'severity_counts': counts,
@@ -168,9 +197,10 @@ def render(snapshot, root):
             if record['promotion_confirmed']:
                 lines.append('- Confirmed version tags: `' + record['supported_version_tag'] + '`, `' + record['version_tag'] + '`, `latest`')
             lines.extend(['- Source commit: `' + record['source_commit'] + '`',
-                          '- Upstream: `' + cell(record['upstream']['reference']) + '@' + record['upstream']['digest'] + '`',
-                          '- Scanner: Trivy `' + cell(record['scanner']['version']) + '`',
+                          '- Scanner: ' + cell(record['scanner'].get('name', 'Trivy')) + ' `' + cell(record['scanner']['version']) + '`',
                           '- Public SBOMs, CVE reports, and checksums: [evidence](' + record['evidence_url'] + ')'])
+            if record.get('upstream'):
+                lines.append('- Upstream: `' + cell(record['upstream']['reference']) + '@' + record['upstream']['digest'] + '`')
             for arch, platform in record['platforms'].items():
                 lines.append('- ' + arch + ' digest: `' + platform['digest'] + '`')
                 if platform.get('package_count') is not None:
@@ -183,6 +213,8 @@ def render(snapshot, root):
                          + '. [Evidence](' + attempt['url'] + ')')
         if record.get('error'):
             lines.append('- ' + record['error'])
+        if record.get('coverage'):
+            lines.append('- Coverage: ' + record['coverage'])
         lines.append('')
     (root / 'latest.md').write_text('\n'.join(lines))
     (root / 'status.json').write_text(json.dumps(snapshot, indent=2, sort_keys=True) + '\n')
