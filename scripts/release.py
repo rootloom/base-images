@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 IMAGES = ('debian-slim', 'ubi-minimal', 'alpine', 'ubuntu', 'rocky-minimal')
@@ -90,13 +91,39 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def inspect(ref):
-    summary = run('docker', 'buildx', 'imagetools', 'inspect', ref)
+def registry_retry(operation, published=False):
+    for attempt in range(5):
+        try:
+            return operation()
+        except (HTTPError, URLError, TimeoutError, ConnectionError, subprocess.CalledProcessError) as error:
+            if isinstance(error, HTTPError):
+                recoverable = error.code in (408, 429, 500, 502, 503, 504) or (published and error.code == 404)
+            elif isinstance(error, URLError):
+                recoverable = isinstance(error.reason, (TimeoutError, ConnectionError))
+            elif isinstance(error, subprocess.CalledProcessError):
+                text = ((error.stderr or '') + (error.output or '')).lower()
+                denied = any(word in text for word in ('unauthorized', 'forbidden', 'denied', '401', '403'))
+                recoverable = not denied and (any(word in text for word in (
+                    'too many requests', '429', '500 internal server error', '502 bad gateway',
+                    '503 service unavailable', '504 gateway timeout', 'connection reset',
+                    'connection refused', 'i/o timeout', 'tls handshake timeout')) or
+                    (published and any(word in text for word in ('not found', 'manifest unknown'))))
+            else:
+                recoverable = True
+            if not recoverable or attempt == 4:
+                raise
+            time.sleep(5 * (attempt + 1))
+
+
+def inspect(ref, published=False):
+    summary = registry_retry(lambda: run('docker', 'buildx', 'imagetools', 'inspect', ref,
+                                         stderr=subprocess.PIPE), published)
     match = re.search(r'^Digest:\s+(sha256:[0-9a-f]{64})\s*$', summary, re.M)
     if not match:
         raise ValueError('Registry index digest is missing')
     value = digest(match[1])
-    raw = run('docker', 'buildx', 'imagetools', 'inspect', ref.split('@')[0] + '@' + value, '--raw')
+    raw = registry_retry(lambda: run('docker', 'buildx', 'imagetools', 'inspect',
+                                     ref.split('@')[0] + '@' + value, '--raw', stderr=subprocess.PIPE), published)
     return value, json.loads(raw)
 
 
@@ -185,13 +212,13 @@ def anonymous_registry_access(manifest):
     if not re.fullmatch(r'rootloom/(?:' + '|'.join(IMAGES) + ')', repository):
         raise ValueError('Unexpected public registry repository')
     # Direct HTTP checks do not use Docker credentials or cached image data.
-    with urlopen(f'https://ghcr.io/token?service=ghcr.io&scope=repository:{repository}:pull', timeout=60) as response:
+    with registry_retry(lambda: urlopen(f'https://ghcr.io/token?service=ghcr.io&scope=repository:{repository}:pull', timeout=60)) as response:
         token = json.loads(response.read())['token']
     for value in {manifest['index_digest'], *[record['digest'] for record in manifest['platforms'].values()]}:
         request = Request(f'https://ghcr.io/v2/{repository}/manifests/{digest(value)}',
                           headers={'Authorization': 'Bearer ' + token,
                                    'Accept': 'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'})
-        with urlopen(request, timeout=60) as response:
+        with registry_retry(lambda: urlopen(request, timeout=60), published=True) as response:
             if 'sha256:' + hashlib.sha256(response.read()).hexdigest() != value:
                 raise ValueError('Anonymous registry manifest mismatch')
 
@@ -208,16 +235,23 @@ def promote(manifest, out, repo, tag):
     run('cosign', 'sign', '--yes', ref)
     for record in manifest['platforms'].values():
         run('cosign', 'sign', '--yes', registry + '@' + record['digest'])
+    identity = 'https://github.com/rootloom/base-images/.github/workflows/release.yml@refs/heads/main'
+    issuer = 'https://token.actions.githubusercontent.com'
+    signed = sorted({manifest['index_digest'], *[record['digest'] for record in manifest['platforms'].values()]})
+    for value in signed:
+        run('cosign', 'verify', '--certificate-identity', identity,
+            '--certificate-oidc-issuer', issuer, registry + '@' + digest(value))
     version = manifest['version_tag']
     supported = manifest['supported_version_tag']
     run('docker', 'buildx', 'imagetools', 'create', '-t', registry + ':' + version,
         '-t', registry + ':' + supported, '-t', registry + ':latest', ref)
     for stable in (version, supported, 'latest'):
-        promoted, _ = inspect(registry + ':' + stable)
+        promoted, _ = inspect(registry + ':' + stable, published=True)
         if promoted != manifest['index_digest']:
             raise ValueError('Promoted index differs from qualified index')
     promotion = {key: manifest[key] for key in ('image', 'index_digest', 'version_tag', 'supported_version_tag')}
     promotion.update(schema_version=1, status='promoted', promoted_at=now(), manifest_sha256=sha(out / 'manifest.json'))
+    promotion['signature_verification'] = {'status': 'passed', 'identity': identity, 'issuer': issuer, 'digests': signed}
     path = out / 'promotion.json'
     write_json(path, promotion)
     # Do not overwrite evidence. A workflow retry uses a new run attempt and tag.
@@ -305,7 +339,7 @@ def main(mode, image):
             '--label', 'org.opencontainers.image.source=https://github.com/' + repo,
             '--label', 'org.opencontainers.image.revision=' + source,
             '-t', candidate, str(dockerfile.parent))
-        index_digest, index = inspect(candidate)
+        index_digest, index = inspect(candidate, published=True)
         manifest['index_digest'] = index_digest
         write_json(out / 'index.json', index)
         children = platforms(index)

@@ -6,7 +6,7 @@ import tempfile
 import io
 import os
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('release', Path(__file__).parents[1] / 'scripts/release.py')
 release = importlib.util.module_from_spec(spec)
@@ -83,12 +83,18 @@ class ReleaseTests(unittest.TestCase):
 
     def test_promotion_record_only_after_all_gates(self):
         _, manifest, _ = self.evidence()
-        for failure in ('anonymous', 'signature', 'tag', None):
+        manifest['platforms']['amd64']['digest'] = 'sha256:' + 'b' * 64
+        manifest['platforms']['arm64']['digest'] = 'sha256:' + 'c' * 64
+        for failure in ('anonymous', 'signature', 'verify-index', 'verify-amd64', 'verify-arm64', 'tag', None):
             calls = []
             def command(*args, **kwargs):
                 calls.append(args)
                 if failure == 'signature' and args[0] == 'cosign':
                     raise RuntimeError('signature failed')
+                failed_digest = {'verify-index': DIGEST, 'verify-amd64': 'sha256:' + 'b' * 64,
+                                 'verify-arm64': 'sha256:' + 'c' * 64}.get(failure)
+                if args[:2] == ('cosign', 'verify') and args[-1].endswith('@' + (failed_digest or 'none')):
+                    raise RuntimeError('signature verification failed')
                 return ''
             with tempfile.TemporaryDirectory() as directory:
                 out = Path(directory)
@@ -104,6 +110,8 @@ class ReleaseTests(unittest.TestCase):
                         self.assertFalse(any(call[:3] == ('gh', 'release', 'upload') for call in calls))
                         if failure == 'anonymous':
                             self.assertEqual(calls, [])
+                        if failure == 'signature' or failure.startswith('verify-'):
+                            self.assertFalse(any(call[:4] == ('docker', 'buildx', 'imagetools', 'create') for call in calls))
                     else:
                         release.promote(manifest, out, 'rootloom/base-images', 'standard-alpine-1-1')
                         self.assertEqual(inspected.call_count, 3)
@@ -113,6 +121,18 @@ class ReleaseTests(unittest.TestCase):
                         self.assertEqual(record['version_tag'], 'standard-1-1')
                         self.assertEqual(calls[-1][:3], ('gh', 'release', 'upload'))
                         self.assertNotIn('--clobber', calls[-1])
+                        checks = [call for call in calls if call[:2] == ('cosign', 'verify')]
+                        self.assertEqual(len(checks), 3)
+                        self.assertEqual({call[-1] for call in checks},
+                                         {manifest['image'] + '@' + value for value in (DIGEST, 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64)})
+                        for check in checks:
+                            self.assertEqual(check[2:6], ('--certificate-identity',
+                                             'https://github.com/rootloom/base-images/.github/workflows/release.yml@refs/heads/main',
+                                             '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com'))
+                        promotion_call = next(i for i, call in enumerate(calls) if call[:4] == ('docker', 'buildx', 'imagetools', 'create'))
+                        self.assertTrue(all(calls.index(check) < promotion_call for check in checks))
+                        self.assertEqual(record['signature_verification']['status'], 'passed')
+                        self.assertEqual(len(record['signature_verification']['digests']), 3)
                         verified.assert_called_once()
 
     def test_scheduled_skip_and_forced_refresh(self):
@@ -253,6 +273,55 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release, 'run', return_value='Digest: <no value>'):
             with self.assertRaises(ValueError):
                 release.inspect('alpine:3.24')
+
+    def test_registry_retry_recoverable_and_bounded(self):
+        for error in (release.HTTPError('https://ghcr.io', 429, 'rate limited', None, None),
+                      release.HTTPError('https://ghcr.io', 503, 'unavailable', None, None),
+                      release.URLError(TimeoutError('timed out')),
+                      release.subprocess.CalledProcessError(1, ['docker'], stderr='503 Service Unavailable')):
+            with self.subTest(error=error), patch.object(release.time, 'sleep') as sleep:
+                operation = Mock(side_effect=[error, 'ok'])
+                self.assertEqual(release.registry_retry(operation), 'ok')
+                self.assertEqual(operation.call_count, 2)
+                sleep.assert_called_once_with(5)
+                operation = Mock(side_effect=error)
+                sleep.reset_mock()
+                with self.assertRaises(type(error)):
+                    release.registry_retry(operation)
+                self.assertEqual(operation.call_count, 5)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 15, 20])
+
+    def test_registry_retry_does_not_retry_security_or_validation_failures(self):
+        for error in (release.HTTPError('https://ghcr.io', 401, 'unauthorized', None, None),
+                      release.HTTPError('https://ghcr.io', 403, 'forbidden', None, None),
+                      release.HTTPError('https://ghcr.io', 404, 'not found', None, None),
+                      release.URLError('certificate verify failed'), ValueError('digest mismatch'),
+                      release.subprocess.CalledProcessError(1, ['docker'], stderr='401 Unauthorized: not found'),
+                      release.subprocess.CalledProcessError(1, ['docker'], stderr='manifest unknown'),
+                      release.subprocess.CalledProcessError(1, ['cosign'], stderr='signature mismatch')):
+            with self.subTest(error=error), patch.object(release.time, 'sleep') as sleep:
+                operation = Mock(side_effect=error)
+                with self.assertRaises(type(error)):
+                    release.registry_retry(operation)
+                self.assertEqual(operation.call_count, 1)
+                sleep.assert_not_called()
+
+    def test_published_inspection_retries_missing_manifest(self):
+        missing = release.subprocess.CalledProcessError(1, ['docker'], stderr='candidate: not found')
+        with patch.object(release, 'run', side_effect=[missing, 'Digest: ' + DIGEST, '{"manifests": []}']) as command, \
+             patch.object(release.time, 'sleep') as sleep:
+            self.assertEqual(release.inspect('ghcr.io/rootloom/alpine:candidate-1-1', published=True), (DIGEST, {'manifests': []}))
+            self.assertEqual(command.call_count, 3)
+            sleep.assert_called_once_with(5)
+
+    def test_anonymous_denial_is_not_retried(self):
+        _, manifest, _ = self.evidence()
+        error = release.HTTPError('https://ghcr.io/token', 401, 'unauthorized', None, None)
+        with patch.object(release, 'urlopen', side_effect=error) as opened, patch.object(release.time, 'sleep') as sleep:
+            with self.assertRaises(release.HTTPError):
+                release.anonymous_registry_access(manifest)
+            opened.assert_called_once()
+            sleep.assert_not_called()
 
     def test_duplicate_platform(self):
         entry = {'digest': DIGEST, 'platform': {'os': 'linux', 'architecture': 'amd64'}}
