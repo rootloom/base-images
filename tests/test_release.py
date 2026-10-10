@@ -83,7 +83,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_promotion_record_only_after_all_gates(self):
         _, manifest, _ = self.evidence()
-        for failure in ('signature', 'tag', None):
+        for failure in ('anonymous', 'signature', 'tag', None):
             calls = []
             def command(*args, **kwargs):
                 calls.append(args)
@@ -94,6 +94,7 @@ class ReleaseTests(unittest.TestCase):
                 out = Path(directory)
                 release.write_json(out / 'manifest.json', manifest)
                 with patch.object(release, 'run', side_effect=command), \
+                     patch.object(release, 'anonymous_registry_access', side_effect=RuntimeError('anonymous denied') if failure == 'anonymous' else None), \
                      patch.object(release, 'inspect', return_value=('sha256:' + ('b' if failure == 'tag' else 'a') * 64, {})) as inspected, \
                      patch.object(release, 'verify_public') as verified:
                     if failure:
@@ -101,6 +102,8 @@ class ReleaseTests(unittest.TestCase):
                             release.promote(manifest, out, 'rootloom/base-images', 'standard-alpine-1-1')
                         self.assertFalse((out / 'promotion.json').exists())
                         self.assertFalse(any(call[:3] == ('gh', 'release', 'upload') for call in calls))
+                        if failure == 'anonymous':
+                            self.assertEqual(calls, [])
                     else:
                         release.promote(manifest, out, 'rootloom/base-images', 'standard-alpine-1-1')
                         self.assertEqual(inspected.call_count, 3)
@@ -157,7 +160,7 @@ class ReleaseTests(unittest.TestCase):
                          patch.object(release, 'run', side_effect=command), patch.object(release.subprocess, 'run'), \
                          patch.object(release, 'inspect', return_value=(DIGEST, index)), \
                          patch.object(release, 'promoted_evidence', return_value=(previous, promotion)) as lookup, \
-                         patch.object(release, 'verify_public'):
+                         patch.object(release, 'verify_public'), patch.object(release, 'anonymous_registry_access'):
                         release.main('release', 'alpine')
                     if event == 'schedule':
                         lookup.assert_called_once()
@@ -188,6 +191,21 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(release.base_default('ARG BASE_IMAGE=alpine:3.22\nFROM ${BASE_IMAGE}\n'), 'alpine:3.22')
         with self.assertRaises(ValueError):
             release.base_default('FROM alpine:latest')
+
+    def test_anonymous_registry_requires_exact_public_bytes(self):
+        _, manifest, _ = self.evidence()
+        data = b'{"schemaVersion": 2}'
+        value = 'sha256:' + release.hashlib.sha256(data).hexdigest()
+        manifest['index_digest'] = value
+        for record in manifest['platforms'].values():
+            record['digest'] = value
+        with patch.object(release, 'urlopen', side_effect=[io.BytesIO(b'{"token":"anonymous"}'), io.BytesIO(data)]) as opened:
+            release.anonymous_registry_access(manifest)
+            self.assertNotIn('Authorization', opened.call_args_list[0].args[0])
+            self.assertEqual(opened.call_args_list[1].args[0].get_header('Authorization'), 'Bearer anonymous')
+        with patch.object(release, 'urlopen', side_effect=[io.BytesIO(b'{"token":"anonymous"}'), io.BytesIO(b'wrong')]):
+            with self.assertRaisesRegex(ValueError, 'manifest mismatch'):
+                release.anonymous_registry_access(manifest)
 
     def test_platforms(self):
         index = {'manifests': [{'digest': DIGEST, 'platform': {'os': 'linux', 'architecture': arch}} for arch in release.ARCHES]}

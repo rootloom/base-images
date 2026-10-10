@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 IMAGES = ('debian-slim', 'ubi-minimal', 'alpine', 'ubuntu', 'rocky-minimal')
 ARCHES = ('amd64', 'arm64')
@@ -180,9 +180,26 @@ def refresh_reason(inputs, manifest=None, promotion=None, checked_at=None):
     return None
 
 
+def anonymous_registry_access(manifest):
+    repository = manifest['image'].removeprefix('ghcr.io/')
+    if not re.fullmatch(r'rootloom/(?:' + '|'.join(IMAGES) + ')', repository):
+        raise ValueError('Unexpected public registry repository')
+    # Direct HTTP checks do not use Docker credentials or cached image data.
+    with urlopen(f'https://ghcr.io/token?service=ghcr.io&scope=repository:{repository}:pull', timeout=60) as response:
+        token = json.loads(response.read())['token']
+    for value in {manifest['index_digest'], *[record['digest'] for record in manifest['platforms'].values()]}:
+        request = Request(f'https://ghcr.io/v2/{repository}/manifests/{digest(value)}',
+                          headers={'Authorization': 'Bearer ' + token,
+                                   'Accept': 'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'})
+        with urlopen(request, timeout=60) as response:
+            if 'sha256:' + hashlib.sha256(response.read()).hexdigest() != value:
+                raise ValueError('Anonymous registry manifest mismatch')
+
+
 def promote(manifest, out, repo, tag):
     registry = manifest['image']
     ref = registry + '@' + manifest['index_digest']
+    anonymous_registry_access(manifest)
     # New GHCR packages can be private. Require anonymous pulls before promotion.
     with tempfile.TemporaryDirectory() as config:
         env = dict(os.environ, DOCKER_CONFIG=config)
