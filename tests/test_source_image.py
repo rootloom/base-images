@@ -25,6 +25,18 @@ class SourceImagePolicy(unittest.TestCase):
         dockerfile = (RECIPE / "Dockerfile").read_text()
         self.assertIn(lock["builder"]["image"] + "@" + lock["builder"]["digest"], dockerfile)
 
+    def test_busybox_remediation_pin(self):
+        lock = json.loads((RECIPE / "sources.lock.json").read_text())
+        source = next(x for x in lock["sources"] if x["name"] == "busybox")
+        self.assertEqual(source["version"], "1.37.0")
+        self.assertEqual(source["sha256"], "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4")
+        self.assertEqual(source["purl"], "pkg:generic/busybox@1.37.0")
+        self.assertIn("CVE-2022-48174", source["verification"])
+        build = (RECIPE / "build.sh").read_text()
+        self.assertIn("/downloads/" + source["filename"], build)
+        self.assertIn("/build/busybox-1.37.0", build)
+        self.assertIn("/build/busybox-1.37.0/.config", (RECIPE / "evidence.py").read_text())
+
     def test_scratch_and_network_boundary(self):
         dockerfile = (RECIPE / "Dockerfile").read_text()
         runtime = dockerfile.split("FROM scratch AS runtime\n")[1]

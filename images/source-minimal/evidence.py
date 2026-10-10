@@ -28,7 +28,7 @@ def main(arch):
     for path in root.rglob("*"):
         if not path.is_symlink() and path.stat().st_mode & 0o6000:
             raise ValueError(f"Setuid or setgid output: {path}")
-    effective_config = Path("/build/busybox-1.36.1/.config").read_text()
+    effective_config = Path("/build/busybox-1.37.0/.config").read_text()
     for key in ["CONFIG_BUSYBOX=y", "CONFIG_ASH=y", "CONFIG_SH_IS_ASH=y", "CONFIG_PIE=y"]:
         if key not in effective_config.splitlines():
             raise ValueError(f"Missing effective config: {key}")

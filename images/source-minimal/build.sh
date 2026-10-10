@@ -11,7 +11,7 @@ export KCONFIG_NOTIMESTAMP=1
 mkdir -p /build /rootfs/bin /rootfs/lib /evidence/sources
 cd /build
 tar -xzf /downloads/musl-1.2.6.tar.gz
-tar -xjf /downloads/busybox-1.36.1.tar.bz2
+tar -xjf /downloads/busybox-1.37.0.tar.bz2
 tar -xJf /downloads/llvm-project-23.1.3.src.tar.xz llvm-project-23.1.3.src/compiler-rt
 cd /build/musl-1.2.6
 patch --batch --fuzz=0 -p1 < /downloads/musl-iconv-gb18030.patch
@@ -36,7 +36,7 @@ specs.write_text(text)
 PY
 cp /opt/musl/lib/libc.so /rootfs/lib/libc.so
 ln -s libc.so "/rootfs/lib/ld-musl-$musl_arch.so.1"
-cd /build/busybox-1.36.1
+cd /build/busybox-1.37.0
 make allnoconfig > /dev/null
 python3 - <<'PY'
 from pathlib import Path
@@ -69,7 +69,7 @@ chown 65532:65532 /rootfs/app /rootfs/home/rootloom
 cp /downloads/cacert-2026-09-25.pem /rootfs/etc/ssl/certs/ca-certificates.crt
 ln -s certs/ca-certificates.crt /rootfs/etc/ssl/cert.pem
 cp /build/musl-1.2.6/COPYRIGHT /rootfs/usr/share/licenses/musl.txt
-cp /build/busybox-1.36.1/LICENSE /rootfs/usr/share/licenses/busybox.txt
+cp /build/busybox-1.37.0/LICENSE /rootfs/usr/share/licenses/busybox.txt
 cp /build/llvm-project-23.1.3.src/compiler-rt/LICENSE.TXT /rootfs/usr/share/licenses/compiler-rt.txt
 cp /recipe/CA-NOTICE.txt /rootfs/usr/share/licenses/mozilla-ca-bundle.txt
 cp /downloads/* /evidence/sources/

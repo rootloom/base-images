@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "image_version": "musl-1.2.6-busybox-1.36.1-rt-23.1.3-r2",
+  "image_version": "musl-1.2.6-busybox-1.37.0-rt-23.1.3-r3",
   "source_date_epoch": 1789689600,
   "supported_architectures": ["amd64", "arm64"],
   "builder": {
@@ -23,13 +23,13 @@
       "verification": "Archive SHA-256 and detached GPG signature verified against the upstream published fingerprint."
     },
     {
-      "name": "busybox", "version": "1.36.1", "kind": "runtime-source",
-      "url": "https://busybox.net/downloads/busybox-1.36.1.tar.bz2",
-      "filename": "busybox-1.36.1.tar.bz2",
-      "sha256": "b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314",
-      "license": "GPL-2.0-only", "purl": "pkg:generic/busybox@1.36.1",
-      "cpe": "cpe:2.3:a:busybox:busybox:1.36.1:*:*:*:*:*:*:*",
-      "verification": "Archive matches upstream HTTPS .sha256; upstream labels this release stable."
+      "name": "busybox", "version": "1.37.0", "kind": "runtime-source",
+      "url": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
+      "filename": "busybox-1.37.0.tar.bz2",
+      "sha256": "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4",
+      "license": "GPL-2.0-only", "purl": "pkg:generic/busybox@1.37.0",
+      "cpe": "cpe:2.3:a:busybox:busybox:1.37.0:*:*:*:*:*:*:*",
+      "verification": "Archive matches upstream HTTPS .sha256. shell/math.c includes the numeric-token guard from upstream fix d417193cf37ca1005830d7e16f5fa7e1d8a44209 for CVE-2022-48174."
     },
     {
       "name": "compiler-rt-builtins", "version": "23.1.3", "kind": "runtime-source",
