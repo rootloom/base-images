@@ -7,17 +7,28 @@ case "$arch" in
     arm64) musl_arch=aarch64 ;;
     *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
 esac
-export KCONFIG_NOTIMESTAMP=1
+export KCONFIG_NOTIMESTAMP=1 PYTHONDONTWRITEBYTECODE=1
+test ! -e /rootfs
+test ! -e /build
 mkdir -p /build /rootfs/bin /rootfs/lib /evidence/sources
+chmod 0755 /recipe/compiler.sh /recipe/linker.sh
+export REALGCC=/recipe/compiler.sh
 cd /build
-tar -xzf /downloads/musl-1.2.6.tar.gz
-tar -xjf /downloads/busybox-1.37.0.tar.bz2
+if [ -n "${ALPINE_SOURCE_INPUTS:-}" ]; then
+    python3 /alpine/source.py prepare-runtime "$ALPINE_SOURCE_INPUTS" /build
+else
+    tar -xzf /downloads/musl-1.2.6.tar.gz
+    tar -xjf /downloads/busybox-1.37.0.tar.bz2
+    cd /build/musl-1.2.6
+    patch --batch --fuzz=0 -p1 < /downloads/musl-iconv-gb18030.patch
+    patch --batch --fuzz=0 -p1 < /downloads/musl-qsort-CVE-2026-40200.patch
+    cd /build
+fi
 tar -xJf /downloads/llvm-project-23.1.3.src.tar.xz llvm-project-23.1.3.src/compiler-rt
 cd /build/musl-1.2.6
-patch --batch --fuzz=0 -p1 < /downloads/musl-iconv-gb18030.patch
-patch --batch --fuzz=0 -p1 < /downloads/musl-qsort-CVE-2026-40200.patch
+python3 /recipe/origins.py snapshot
 ./configure --prefix=/opt/musl --syslibdir=/lib \
-    LIBCC=/build/compiler-builtins.a \
+    CC=/recipe/compiler.sh LIBCC=/build/compiler-builtins.a \
     CFLAGS='-O2 -fstack-protector-strong -fstack-clash-protection -ffile-prefix-map=/build=.' \
     LDFLAGS='-Wl,-z,relro,-z,now,-z,noexecstack,--build-id=none,-Map,/evidence/musl.link.map'
 make -s obj/include/bits/alltypes.h obj/include/bits/syscall.h
@@ -30,6 +41,7 @@ specs = Path('/opt/musl/lib/musl-gcc.specs')
 text = specs.read_text()
 text = text.replace('libgcc.a%s %:if-exists(libgcc_eh.a%s)', '/build/compiler-builtins.a')
 text = text.replace(' crtbeginS.o%s', '').replace('crtendS.o%s ', '')
+text = text.replace(' -isystem include%s', '')
 if 'libgcc.a' in text or 'crtbegin' in text or 'crtend' in text:
     raise ValueError('Bootstrap runtime remains in compiler specs')
 specs.write_text(text)
@@ -49,7 +61,7 @@ for line in Path('/recipe/busybox.config').read_text().splitlines():
 config.write_text('\n'.join(lines) + '\n')
 PY
 yes '' | make oldconfig > /dev/null
-make -s -j2 CC=/opt/musl/bin/musl-gcc \
+make -s -j2 CC=/opt/musl/bin/musl-gcc LD=/recipe/linker.sh \
     EXTRA_CFLAGS='-std=gnu11 -O2 -fPIE -fstack-protector-strong -fstack-clash-protection -Wformat -Werror=format-security -ffile-prefix-map=/build=.' \
     EXTRA_LDFLAGS='-pie -Wl,-z,relro,-z,now,-z,noexecstack,--build-id=none,-Map,/evidence/busybox.link.map' \
     || { cat busybox_unstripped.out; exit 1; }
@@ -76,6 +88,12 @@ cp /downloads/* /evidence/sources/
 cp -R /recipe /evidence/sources/recipe
 cp .config /evidence/sources/busybox.effective.config
 python3 /recipe/evidence.py "$arch"
+if [ -n "${ALPINE_SOURCE_INPUTS:-}" ]; then
+    python3 /alpine/source.py build-layout "$ALPINE_SOURCE_INPUTS" /alpine-layout
+    python3 /alpine/runtime.py merge-layout /rootfs /alpine-layout/rootfs /evidence "$musl_arch" "$ALPINE_SOURCE_INPUTS"
+    chmod 1777 /rootfs/tmp
+    chown 65532:65532 /rootfs/app /rootfs/home/rootloom
+fi
 find /rootfs -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 tar --sort=name --format=gnu --mtime="@$SOURCE_DATE_EPOCH" --numeric-owner \
     -C /rootfs -cf /evidence/rootfs.tar .

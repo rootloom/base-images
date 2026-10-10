@@ -19,14 +19,13 @@ def main(arch):
     names = sorted(set(names) - {"apple_versioning.c", "os_version_check.c", "trampoline_setup.c"})
     output = Path("/build/compiler-builtins")
     output.mkdir()
-    gcc_headers = subprocess.check_output(["gcc", "-print-file-name=include"], text=True).strip()
     include = []
-    for path in ["/build/musl-1.2.6/obj/include", "/build/musl-1.2.6/include", "/build/musl-1.2.6/arch/" + arch, "/build/musl-1.2.6/arch/generic", gcc_headers]:
+    for path in ["/build/musl-1.2.6/obj/include", "/build/musl-1.2.6/include", "/build/musl-1.2.6/arch/" + arch, "/build/musl-1.2.6/arch/generic"]:
         include.extend(["-isystem", path])
     objects = []
     for name in names:
         object_path = output / (name + ".o")
-        subprocess.run(["gcc", "-std=gnu11", "-O2", "-fPIC", "-ffreestanding", "-fno-stack-protector", "-fvisibility=hidden", "-nostdinc", "-ffile-prefix-map=/build=.", *include, "-c", str(sources / name), "-o", str(object_path)], check=True)
+        subprocess.run(["/recipe/compiler.sh", "-std=gnu11", "-O2", "-fPIC", "-ffreestanding", "-fno-stack-protector", "-fvisibility=hidden", "-nostdinc", "-ffile-prefix-map=/build=.", *include, "-c", str(sources / name), "-o", str(object_path)], check=True)
         objects.append(str(object_path))
     subprocess.run(["ar", "rcsD", "/build/compiler-builtins.a", *objects], check=True)
     Path("/evidence/sources/compiler-builtins.sources").write_text("\n".join(names) + "\n")

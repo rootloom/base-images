@@ -16,6 +16,12 @@ No row below is release-qualified under the new contract.
 
 ## Conversion Ledger
 
+Implemented first slices now exist for Debian, Ubuntu, and Alpine.
+[`docs/source-slices.md`](source-slices.md) records the Debian/Ubuntu locks, offline data build, and signature boundaries.
+[`images/alpine/SOURCE.md`](../images/alpine/SOURCE.md) records the pinned Alpine packaging recipe and patched-source preparation.
+These locks cover selected slices only, not complete runtime or build-tool dependency graphs.
+The baseline table below records the remaining full conversions; no distribution runtime is yet source-qualified.
+
 The component lists are first closure candidates, not verified complete package sets.
 The implementation owner must resolve the exact source and runtime dependency graph for both architectures.
 Build-only dependencies need provenance even when they do not ship.

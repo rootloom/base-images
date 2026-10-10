@@ -172,6 +172,86 @@ class SourceReleaseTests(unittest.TestCase):
         lock, report = self.evidence()
         self.assertEqual(source.source_policy(report, lock, REF), [])
 
+    def primary(self, lock):
+        # Minimal fixture for the published CNA range, not complete advisory coverage.
+        data = {'dataType': 'CVE_RECORD', 'cveMetadata': {'cveId': 'CVE-2026-40200', 'state': 'PUBLISHED'},
+                'containers': {'cna': {'providerMetadata': {'shortName': 'mitre'},
+                    'references': [{'url': 'https://www.openwall.com/lists/oss-security/2026/04/10/13'}],
+                    'affected': [{'vendor': 'musl-libc', 'product': 'musl', 'defaultStatus': 'unknown',
+                        'versions': [{'version': '0.7.10', 'lessThanOrEqual': '1.2.6', 'versionType': 'semver', 'status': 'affected'}]}],
+                    'metrics': [{'cvssV3_1': {'baseSeverity': 'HIGH'}}]}}}
+        payload = json.dumps(data).encode()
+        snapshot = {'url': source.MUSL_ADVISORY, 'sha256': hashlib.sha256(payload).hexdigest(),
+                    'bytes_base64': base64.b64encode(payload).decode()}
+        musl = next(s for s in lock['sources'] if s['name'] == 'musl')
+        return {'musl': {'version': musl['version'], 'source_sha256': musl['sha256'], 'snapshot': snapshot,
+            'controls': {v: ['CVE-2026-40200'] for v in ('0.7.10', '1.2.6')}, 'blocked': ['CVE-2026-40200']}}
+
+    def test_primary_musl_blocks_even_when_nvd_has_no_match(self):
+        lock, report = self.evidence()
+        report.update(schema_version=2, primary_advisories=self.primary(lock))
+        self.assertEqual(source.source_policy(report, lock, REF), ['CVE-2026-40200'])
+        # Lock patches never suppress primary or NVD findings.
+        lock['patches'] = [{'component': 'musl', 'cve': 'CVE-2026-40200'}]
+        self.assertEqual(source.source_policy(report, lock, REF), ['CVE-2026-40200'])
+
+    def test_primary_unknown_versions_and_tampering_fail_closed(self):
+        lock, _ = self.evidence()
+        evidence = self.primary(lock)
+        snapshot = evidence['musl']['snapshot']
+        for version in ('0.7.9', '1.2.7', '1.2.6-patched', 'unknown'):
+            with self.assertRaisesRegex(ValueError, 'Unknown primary musl'):
+                source.musl_advisory_policy(snapshot, version)
+        for mutate in (lambda e: e['musl'].update(version='1.2.5'),
+                       lambda e: e['musl'].update(source_sha256='b' * 64),
+                       lambda e: e['musl'].update(controls={}),
+                       lambda e: e['musl'].update(blocked=[]),
+                       lambda e: e['musl']['snapshot'].update(sha256='b' * 64),
+                       lambda e: e['musl']['snapshot'].update(url='https://example.invalid')):
+            broken = copy.deepcopy(evidence)
+            mutate(broken)
+            with self.assertRaises(ValueError):
+                source.primary_policy(broken, lock)
+
+    def test_changed_primary_range_and_missing_new_evidence_block(self):
+        lock, report = self.evidence()
+        report['schema_version'] = 2
+        with self.assertRaises(KeyError):
+            source.source_policy(report, lock, REF)
+        primary = self.primary(lock)
+        snapshot = primary['musl']['snapshot']
+        data = source.advisory_data(snapshot, source.MUSL_ADVISORY)
+        data['containers']['cna']['affected'][0]['versions'][0]['lessThanOrEqual'] = '1.2.5'
+        payload = json.dumps(data).encode()
+        snapshot.update(sha256=hashlib.sha256(payload).hexdigest(), bytes_base64=base64.b64encode(payload).decode())
+        with self.assertRaisesRegex(ValueError, 'range changed'):
+            source.primary_policy(primary, lock)
+
+    def test_empty_llvm_feed_does_not_close_builtins_coverage(self):
+        lock, report = self.evidence()
+        actual = json.loads((Path(__file__).parents[1] / 'images/source-minimal/sources.lock.json').read_text())
+        primary = self.primary(lock)
+        primary['compiler-rt-builtins'] = {'coverage_status': 'unknown', 'snapshot': {
+            'url': source.LLVM_ADVISORIES, 'sha256': hashlib.sha256(b'[]').hexdigest(),
+            'bytes_base64': base64.b64encode(b'[]').decode()}}
+        report.update(schema_version=2, primary_advisories=primary)
+        with self.assertRaisesRegex(ValueError, 'Unsupported source component coverage'):
+            source.source_policy(report, actual, REF)
+        primary['compiler-rt-builtins']['coverage_status'] = 'complete'
+        with self.assertRaisesRegex(ValueError, 'Unsupported compiler-rt'):
+            source.primary_policy(primary, actual)
+
+    def test_primary_fetch_failure_or_pagination_is_not_empty_coverage(self):
+        with patch.object(source, 'urlopen', side_effect=OSError('network failed')):
+            with self.assertRaises(OSError):
+                source.advisory_snapshot(source.LLVM_ADVISORIES)
+        with patch.object(source, 'urlopen') as opened:
+            response = opened.return_value.__enter__.return_value
+            response.read.return_value = b'[]'
+            response.headers = {'Link': '<https://example.invalid>; rel="next"'}
+            with self.assertRaisesRegex(ValueError, 'Incomplete'):
+                source.advisory_snapshot(source.LLVM_ADVISORIES)
+
     def test_missing_fix_still_blocks_high_and_critical(self):
         lock, report = self.evidence()
         for severity in ('High', 'Critical'):
@@ -417,6 +497,13 @@ class SourceReleaseTests(unittest.TestCase):
             self.assertEqual(failure['status'], 'blocked')
             self.assertFalse((out / 'promotion.json').exists())
             self.assertTrue(any(c.args[:3] == ('gh', 'release', 'upload') for c in run.call_args_list))
+            manifest['primary_advisories'] = self.primary(lock)
+            source.write_json(out / 'attempt.json', manifest)
+            with self.assertRaisesRegex(RuntimeError, 'no promotion'):
+                source.publish()
+            saved = json.loads((out / 'manifest.json').read_text())
+            self.assertEqual(saved['status'], 'blocked')
+            self.assertEqual(saved['error'], 'Primary advisory preflight binding mismatch')
 
 
 if __name__ == '__main__':

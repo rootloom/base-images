@@ -1,3 +1,5 @@
+# Historical binary recipe. Not eligible for source-only promotion.
+# The executable pinned source slice is source.py; runtime closure is unfinished.
 ARG BASE_IMAGE=alpine:3.24
 FROM ${BASE_IMAGE}
 

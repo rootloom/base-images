@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "image": "ubuntu",
+  "distribution": "Ubuntu 24.04 LTS (noble)",
+  "scope": "base-files identity and license data only; not a runnable image or full package rebuild",
+  "release_qualified": false,
+  "package": "base-files",
+  "source_root": "base-files-13ubuntu10.5",
+  "vendor": "ubuntu",
+  "version": "13ubuntu10.5",
+  "license": "GPL-2.0-or-later; bundled license texts retain their own notices",
+  "sources": [
+    {
+      "filename": "base-files_13ubuntu10.5.dsc",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/b/base-files/base-files_13ubuntu10.5.dsc",
+      "size": 1625,
+      "sha256": "326996812284298ceb029ae175af1bc55480c977f652469775983b53ae005d9a"
+    },
+    {
+      "filename": "base-files_13ubuntu10.5.tar.xz",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/b/base-files/base-files_13ubuntu10.5.tar.xz",
+      "size": 94204,
+      "sha256": "536ba84ca53e25f5c0aa46c144fddcdad1e477c7a470e70baccd17d7ecfdfc41"
+    }
+  ],
+  "verification_inputs": [
+    {
+      "filename": "ubuntu-base-files-key.asc",
+      "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x25E3FF2D7F469DBE7D0D4E50AFCFEC8E669CE1C2",
+      "size": 124448,
+      "sha256": "c8df300f4fe622d5d7c1dbedacfbad67578c825e8fe8050d36a406e2488119da",
+      "fingerprint": "25E3FF2D7F469DBE7D0D4E50AFCFEC8E669CE1C2"
+    }
+  ],
+  "authentication": {
+    "status": "descriptor-signature-verified",
+    "evidence": "GPG verifies the HTTPS descriptor with the pinned key from Ubuntu's keyserver. The signed descriptor binds the archive SHA-256. Key owner identity and signed distribution index membership are not independently verified.",
+    "claimed_descriptor_signer": "25E3FF2D7F469DBE7D0D4E50AFCFEC8E669CE1C2"
+  },
+  "recipe": {
+    "upstream": "base-files-13ubuntu10.5/debian/rules:override_dh_auto_install",
+    "retained": ["etc/*", "licenses/*", "origins/ubuntu", "debian/copyright"],
+    "generated": "Replace #OSNAME# with GNU/Linux; install os-release under usr/lib and create its relative etc symlink.",
+    "excluded": "locale-check executable and profile script, MOTD scripts/services, logos, shell templates, package metadata, maintainer scripts, directory layout, and all runtime executables."
+  }
+}

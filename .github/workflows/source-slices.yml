@@ -1,0 +1,47 @@
+name: Distribution source slices
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/debian-slim/source-slice.lock.json
+      - images/ubuntu/source-slice.lock.json
+      - scripts/base_files_slice.py
+      - tests/test_debian_source.py
+      - .github/workflows/source-slices.yml
+  pull_request:
+    paths:
+      - images/debian-slim/source-slice.lock.json
+      - images/ubuntu/source-slice.lock.json
+      - scripts/base_files_slice.py
+      - tests/test_debian_source.py
+      - .github/workflows/source-slices.yml
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  data:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [debian-slim, ubuntu]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Test source admission
+        run: python3 -m unittest discover -s tests -p test_debian_source.py -v
+      - name: Fetch checksum-pinned source and signature inputs
+        run: python3 scripts/base_files_slice.py --lock "images/$IMAGE/source-slice.lock.json" --inputs evidence/inputs --fetch-only
+        env:
+          IMAGE: ${{ matrix.image }}
+      - name: Build the offline data slice twice
+        run: |
+          python3 scripts/base_files_slice.py --lock "images/$IMAGE/source-slice.lock.json" --inputs evidence/inputs --output evidence/first
+          python3 scripts/base_files_slice.py --lock "images/$IMAGE/source-slice.lock.json" --inputs evidence/inputs --output evidence/second
+          diff -r evidence/first evidence/second
+        env:
+          IMAGE: ${{ matrix.image }}

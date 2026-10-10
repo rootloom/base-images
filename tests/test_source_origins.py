@@ -1,0 +1,201 @@
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import sys
+import unittest
+from unittest.mock import patch
+
+
+RECIPE = Path(__file__).resolve().parents[1] / "images/source-minimal"
+compiler_spec = importlib.util.spec_from_file_location("source_compiler", RECIPE / "compiler.py")
+compiler = importlib.util.module_from_spec(compiler_spec)
+compiler_spec.loader.exec_module(compiler)
+spec = importlib.util.spec_from_file_location("source_origins", RECIPE / "origins.py")
+origins = importlib.util.module_from_spec(spec)
+with patch.dict(sys.modules, {"compiler": compiler}):
+    spec.loader.exec_module(origins)
+
+
+class SourceOrigins(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.lock = json.loads((RECIPE / "sources.lock.json").read_text())
+
+    def test_shipped_file_mapping(self):
+        (self.root / "bin").mkdir()
+        (self.root / "bin/busybox").write_bytes(b"fixture")
+        (self.root / "bin/sh").symlink_to("busybox")
+        items = {item["path"]: item for item in origins.file_origins(self.root, self.lock)}
+        self.assertEqual(items["bin/busybox"]["kind"], "compiled")
+        self.assertEqual({x["name"] for x in items["bin/busybox"]["sources"]}, {"busybox", "musl", "compiler-rt-builtins"})
+        self.assertEqual(items["bin/sh"]["target"], "busybox")
+        self.assertNotIn("sha256", items["usr/share/rootloom/rootfs.sha256"])
+
+    def test_unknown_shipped_file_rejected(self):
+        (self.root / "unexpected").write_bytes(b"binary or script")
+        with self.assertRaisesRegex(ValueError, "Unmapped shipped file"):
+            origins.file_origins(self.root, self.lock)
+
+    def test_unknown_symlink_rejected(self):
+        (self.root / "bin").mkdir()
+        (self.root / "bin/sh").symlink_to("/bootstrap/bin/sh")
+        with self.assertRaisesRegex(ValueError, "Unmapped shipped symlink"):
+            origins.file_origins(self.root, self.lock)
+
+    def test_bootstrap_header_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
+            origins.input_origin("/usr/lib/gcc/aarch64-linux-gnu/15/include/stddef.h", {})
+
+    def test_source_directory_prefix_escape_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
+            origins.input_origin("/build/musl-1.2.6-unreviewed/header.h", {})
+
+    def test_known_source_headers(self):
+        header = self.root / "header.h"
+        header.write_bytes(b"source header")
+        index = {str(header): {"component": "musl", "sha256": origins.sha256(header)}}
+        self.assertEqual(origins.input_origin(header, index), "musl")
+        header.write_bytes(b"copied bootstrap header")
+        with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
+            origins.input_origin(header, index)
+
+    def test_unindexed_source_tree_header_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
+            origins.input_origin("/build/musl-1.2.6/include/copied-bootstrap.h", {})
+
+    def test_assembler_imports_rejected(self):
+        for text in ['.include "/bootstrap/header.s"', '.incbin "/bootstrap/lib.o"', '.INCLUDE "nested.inc"']:
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "Assembler file imports"):
+                compiler.reject_assembler_imports(text)
+        compiler.reject_assembler_imports(".text\n.globl foo\nfoo:\nret\n")
+
+    def test_arbitrary_link_input_rejected(self):
+        (self.root / "innocent-name.o").write_bytes(b"prebuilt")
+        with self.assertRaisesRegex(ValueError, "Unrecorded linker input"):
+            origins.verify_links("LOAD innocent-name.o\n", self.root, [], self.root)
+
+    def test_missing_link_map_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Missing linker inputs"):
+            origins.verify_links("", self.root, [], self.root)
+
+    def test_linker_generated_stub_marker_not_a_file(self):
+        with self.assertRaisesRegex(ValueError, "Missing source-built compiler runtime"):
+            origins.verify_links("LOAD linker stubs\n", self.root, [], self.root)
+        (self.root / "linker stubs").write_bytes(b"unknown object")
+        with self.assertRaisesRegex(ValueError, "Unrecorded linker input"):
+            origins.verify_links("LOAD linker stubs\n", self.root, [], self.root)
+
+    def test_archive_members_require_compilation(self):
+        (self.root / "lib.a").write_bytes(b"archive fixture")
+        with patch.object(origins.subprocess, "check_output", side_effect=["innocent.o\n", b"prebuilt"]):
+            with self.assertRaisesRegex(ValueError, "Unrecorded linker input"):
+                origins.verify_links("LOAD lib.a\n", self.root, [], self.root)
+
+    def test_duplicate_archive_members_rejected(self):
+        with patch.object(origins.subprocess, "check_output", return_value="same.o\nsame.o\n"):
+            with self.assertRaisesRegex(ValueError, "Duplicate archive member"):
+                origins.verify_links("LOAD lib.a\n", self.root, [], self.root)
+
+    def test_changed_preprocessing_rejected(self):
+        (self.root / "record.i").write_bytes(b"changed")
+        record = {"preprocessed": "record.i", "preprocessed_sha256": "0" * 64}
+        with self.assertRaisesRegex(ValueError, "Compiler evidence checksum mismatch"):
+            origins.verify_record(record, self.root)
+
+    def test_consumed_generated_inputs_retained(self):
+        header = self.root / "generated.h"
+        header.write_bytes(b"#define GENERATED 1\n")
+        for name in ["record.i", "record.d", "record.s"]:
+            (self.root / name).write_bytes(b"fixture")
+        record = {"inputs": [{"path": str(header), "sha256": origins.sha256(header)}]}
+        for kind, name in [("preprocessed", "record.i"), ("dependencies", "record.d"), ("assembly", "record.s")]:
+            record[kind] = name
+            record[kind + "_sha256"] = origins.sha256(self.root / name)
+        with patch.object(origins, "input_origin", return_value="musl"):
+            self.assertEqual(origins.verify_record(record, self.root), ["musl"])
+        self.assertEqual((self.root / "inputs" / origins.sha256(header)).read_bytes(), header.read_bytes())
+
+    def test_builder_headers_removed(self):
+        builtins = (RECIPE / "builtins.py").read_text()
+        self.assertNotIn("-print-file-name=include", builtins)
+        self.assertIn('"-nostdinc"', builtins)
+        self.assertIn('"/recipe/compiler.sh"', builtins)
+        self.assertIn("text.replace(' -isystem include%s', '')", (RECIPE / "build.sh").read_text())
+
+    def test_configure_discarded_objects_do_not_need_records(self):
+        args = ["-x", "c", "-", "-c", "-o", "/dev/null"]
+        with patch.object(compiler.subprocess, "run") as run:
+            compiler.main(args)
+        run.assert_called_once_with(["gcc", *args], check=True)
+
+    def test_recorder_preserves_busybox_dependencies_and_exact_inputs(self):
+        source = self.root / "source.c"
+        source.write_bytes(b"int fixture;\n")
+        output = self.root / "source.o"
+        make_dependency = self.root / "make.d"
+        records = self.root / "records"
+        args = ["-pipe", "-Wp,-MD," + str(make_dependency), "-c", str(source), "-o", str(output)]
+        def compile_fixture(command, **kwargs):
+            self.assertNotIn("-pipe", command)
+            self.assertFalse(any(arg.startswith("-Wp,-MD,") for arg in command))
+            output.write_bytes(b"source-built object")
+            output.with_suffix(".i").write_bytes(source.read_bytes())
+            output.with_suffix(".s").write_bytes(b".text\n")
+            Path(command[command.index("-MF") + 1]).write_text("object: " + str(source) + "\n")
+        with patch.object(compiler, "BUILD_ROOT", self.root), patch.object(compiler, "RECORDS", records), patch.object(compiler.subprocess, "run", side_effect=compile_fixture):
+            compiler.main(args)
+        record = json.loads(next(records.glob("*.json")).read_text())
+        self.assertEqual(record["object_sha256"], origins.sha256(output))
+        self.assertEqual(record["inputs"], [{"path": str(source), "sha256": origins.sha256(source)}])
+        self.assertEqual(make_dependency.read_bytes(), (records / record["dependencies"]).read_bytes())
+        self.assertEqual((records / record["preprocessed"]).read_bytes(), source.read_bytes())
+
+    def test_link_script_and_response_input_policy(self):
+        script = self.root / "source.ld"
+        script.write_bytes(b"SECTIONS {}\n")
+        expected = [{"path": str(script), "sha256": origins.sha256(script)}]
+        self.assertEqual(compiler.link_scripts(["-Wl,-T," + str(script)]), expected)
+        self.assertEqual(compiler.link_scripts(["-Wl,-T=" + str(script)]), expected)
+        self.assertEqual(compiler.link_scripts(["-Xlinker", "--script", "-Xlinker", str(script)]), expected)
+        self.assertEqual(compiler.link_scripts(["-Wl,--dynamic-list=" + str(script)]), expected)
+        self.assertEqual(compiler.link_scripts(["-specs=" + str(script)]), expected)
+        with self.assertRaisesRegex(ValueError, "response file"):
+            compiler.link_scripts(["-Wl,@/bootstrap/link.args"])
+
+    def test_partial_link_requires_recorded_source_inputs(self):
+        source_object = self.root / "input.o"
+        source_object.write_bytes(b"compiled input")
+        combined = self.root / "built-in.o"
+        combined.write_bytes(b"relocatable link output")
+        link_map = self.root / "partial.map"
+        link_map.write_text("LOAD input.o\n")
+        record = {"output": str(combined), "output_sha256": origins.sha256(combined), "map": str(link_map),
+                  "map_sha256": origins.sha256(link_map), "scripts": [], "cwd": str(self.root)}
+        compiled = {"object": str(source_object), "object_sha256": origins.sha256(source_object)}
+        with patch.object(origins, "verify_record", return_value=["musl"]):
+            result = origins.verify_links("LOAD built-in.o\n", self.root, [compiled], self.root,
+                                          partial_links={record["output_sha256"]: record}, require_runtime=False)
+        self.assertEqual(result[0]["components"], ["musl"])
+        self.assertEqual(len(result[0]["compilation_records"]), 1)
+        link_map.write_text("LOAD unreviewed.o\n")
+        with self.assertRaisesRegex(ValueError, "Partial link evidence checksum mismatch"):
+            origins.verify_links("LOAD built-in.o\n", self.root, [compiled], self.root,
+                                 partial_links={record["output_sha256"]: record}, require_runtime=False)
+
+    def test_partial_link_cycle_rejected(self):
+        combined = self.root / "built-in.o"
+        combined.write_bytes(b"relocatable output")
+        link_map = self.root / "partial.map"
+        link_map.write_text("LOAD built-in.o\n")
+        record = {"output": str(combined), "output_sha256": origins.sha256(combined), "map": str(link_map),
+                  "map_sha256": origins.sha256(link_map), "scripts": [], "cwd": str(self.root)}
+        with self.assertRaisesRegex(ValueError, "cyclic partial link"):
+            origins.verify_links("LOAD built-in.o\n", self.root, [], self.root,
+                                 partial_links={record["output_sha256"]: record}, require_runtime=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

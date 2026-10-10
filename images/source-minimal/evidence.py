@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from origins import closure
 
 
 def main(arch):
@@ -79,12 +80,15 @@ def main(arch):
     evidence = {
         "schema_version": 1, "architecture": arch, "lock_sha256": lock_hash,
         "builder": lock["builder"], "compiler": subprocess.check_output(["gcc", "--version"], text=True).splitlines()[0],
+        "linker": subprocess.check_output(["ld", "--version"], text=True).splitlines()[0],
         "compile_network": "none", "source_date_epoch": lock["source_date_epoch"],
         "hardening_verified": ["busybox-pie", "relro", "bind-now", "non-executable-stack", "busybox-stack-protector", "musl-only-linkage"],
         "patches": lock["patches"], "full_compiler_bootstrap": False,
         "source_authenticity": {"musl": json.loads(Path("/downloads/musl-signature-verification.json").read_text()), "busybox": "Reviewed upstream HTTPS checksum; no detached signature supplied.", "compiler-rt-builtins": "Reviewed primary LLVM release asset SHA-256; detached signature not verified.", "patches": "Reviewed upstream advisory HTTPS content, checksum pinned; not signer authenticated.", "ca": "Reviewed dated upstream HTTPS data and checksum."},
         "effective_busybox_config_sha256": hashlib.sha256(effective_config.encode()).hexdigest(),
         "compiler_runtime": {"name": "compiler-rt-builtins", "version": "23.1.3", "bootstrap_libgcc": False, "bootstrap_crtbegin_crtend": False},
+        "source_origin_mapping": "source-origins.json",
+        "compiler_input_evidence": "corresponding-source.tar: sources/compilation and sources/source-files.json",
         "rootfs_checksum_scope": "Normalized GNU tar of /rootfs, excluding usr/share/rootloom/rootfs.sha256; before embedding checksum.",
         "coverage": "Source inventory only. No vulnerability scan or FIPS validation is implied.",
     }
@@ -94,6 +98,7 @@ def main(arch):
         (root / "usr/share/rootloom" / name).write_text(data)
     for destination in [Path("/evidence/sources.lock.json"), root / "usr/share/rootloom/sources.lock.json"]:
         destination.write_bytes(lock_bytes)
+    closure(root, lock)
 
 
 if __name__ == "__main__":

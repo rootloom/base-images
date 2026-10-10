@@ -30,8 +30,90 @@ CONTROLS = {
     'busybox': ('cpe:2.3:a:busybox:busybox:1.34.1:*:*:*:*:*:*:*', 'CVE-2022-48174'),
 }
 COVERAGE = ('NVD CPE matching for musl and BusyBox only. CPE records can be missing or incorrect. '
+            'Supplemental primary CNA check for musl CVE-2026-40200. LLVM advisory snapshot is diagnostic only; '
+            'compiler-rt-builtins coverage remains unknown and blocks release. '
             'No distribution advisory coverage, compiler trust bootstrap, CA trust audit, or CVE-free guarantee. '
             'Patches do not automatically suppress findings. No FIPS claim.')
+MUSL_ADVISORY = 'https://cveawg.mitre.org/api/cve/CVE-2026-40200'
+LLVM_ADVISORIES = 'https://api.github.com/repos/llvm/llvm-security-repo/security-advisories?per_page=100'
+
+
+def advisory_snapshot(url):
+    request = Request(url, headers={'Accept': 'application/json', 'User-Agent': 'rootloom-source-release'})
+    with urlopen(request, timeout=60) as response:
+        data = response.read(2 * 1024 * 1024 + 1)
+        if len(data) > 2 * 1024 * 1024:
+            raise ValueError('Oversized primary advisory response')
+        if 'rel="next"' in response.headers.get('Link', ''):
+            raise ValueError('Incomplete primary advisory feed')
+    return {'url': url, 'sha256': hashlib.sha256(data).hexdigest(), 'bytes_base64': base64.b64encode(data).decode()}
+
+
+def advisory_data(snapshot, url):
+    if snapshot.get('url') != url:
+        raise ValueError('Primary advisory source mismatch')
+    data = base64.b64decode(snapshot['bytes_base64'], validate=True)
+    if len(data) > 2 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != checksum(snapshot['sha256']):
+        raise ValueError('Primary advisory checksum mismatch')
+    return json.loads(data)
+
+
+def musl_advisory_policy(snapshot, version):
+    """Supplement NVD with one primary CNA record; never infer full coverage."""
+    record = advisory_data(snapshot, MUSL_ADVISORY)
+    metadata = record['cveMetadata']
+    if record.get('dataType') != 'CVE_RECORD' or metadata['cveId'] != 'CVE-2026-40200' or metadata['state'] != 'PUBLISHED':
+        raise ValueError('Missing primary musl advisory')
+    cna = record['containers']['cna']
+    if cna['providerMetadata']['shortName'] != 'mitre' or not any(
+            r['url'] == 'https://www.openwall.com/lists/oss-security/2026/04/10/13' for r in cna['references']):
+        raise ValueError('Missing primary musl advisory identity')
+    affected = cna['affected']
+    if len(affected) != 1 or affected[0]['vendor'] != 'musl-libc' or affected[0]['product'] != 'musl':
+        raise ValueError('Primary musl component mismatch')
+    expected_range = {'version': '0.7.10', 'lessThanOrEqual': '1.2.6', 'versionType': 'semver', 'status': 'affected'}
+    if affected[0]['versions'] != [expected_range] or affected[0]['defaultStatus'] != 'unknown':
+        raise ValueError('Primary musl advisory range changed; review required')
+    if not any(m.get('cvssV3_1', {}).get('baseSeverity') == 'HIGH' for m in cna['metrics']):
+        raise ValueError('Primary musl advisory severity changed; review required')
+    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+        raise ValueError('Unknown primary musl version')
+    # Both endpoints are known-vulnerable controls. Outside this range, the CNA status is unknown.
+    if not (0, 7, 10) <= tuple(map(int, version.split('.'))) <= (1, 2, 6):
+        raise ValueError('Unknown primary musl affected status; review required')
+    return ['CVE-2026-40200']
+
+
+def primary_advisories(lock):
+    musl = components(lock, require_coverage=False)['musl']
+    snapshot = advisory_snapshot(MUSL_ADVISORY)
+    controls = {v: musl_advisory_policy(snapshot, v) for v in ('0.7.10', '1.2.6')}
+    result = {'musl': {'version': musl['version'], 'source_sha256': musl['sha256'], 'snapshot': snapshot,
+                       'controls': controls, 'blocked': musl_advisory_policy(snapshot, musl['version'])}}
+    if any(s['name'] == 'compiler-rt-builtins' for s in lock['sources']):
+        snapshot = advisory_snapshot(LLVM_ADVISORIES)
+        if not isinstance(advisory_data(snapshot, LLVM_ADVISORIES), list):
+            raise ValueError('Malformed LLVM advisory feed')
+        result['compiler-rt-builtins'] = {'coverage_status': 'unknown', 'snapshot': snapshot,
+            'reason': 'No verified builtins-specific advisory matcher or known-vulnerable positive control. '
+                      'LLVM-wide, sanitizer, and empty-feed results do not establish builtins coverage.'}
+    return result
+
+
+def primary_policy(evidence, lock):
+    musl = components(lock, require_coverage=False)['musl']
+    record = evidence['musl']
+    if record['version'] != musl['version'] or record['source_sha256'] != musl['sha256']:
+        raise ValueError('Primary musl source binding mismatch')
+    controls = {v: musl_advisory_policy(record['snapshot'], v) for v in ('0.7.10', '1.2.6')}
+    blocked = musl_advisory_policy(record['snapshot'], musl['version'])
+    if record['controls'] != controls or record['blocked'] != blocked:
+        raise ValueError('Primary musl findings or positive controls mismatch')
+    if any(s['name'] == 'compiler-rt-builtins' for s in lock['sources']):
+        llvm = evidence['compiler-rt-builtins']
+        if llvm['coverage_status'] != 'unknown' or not isinstance(advisory_data(llvm['snapshot'], LLVM_ADVISORIES), list):
+            raise ValueError('Unsupported compiler-rt primary coverage claim')
+    return blocked
 
 
 def checksum(value):
@@ -119,7 +201,8 @@ def cpe_policy(report, cpe):
 def source_policy(report, lock, expected_ref):
     """Validate saved source scan evidence without shell or network access."""
     digest(expected_ref.rsplit('@', 1)[1])
-    if report.get('schema_version') != 1 or report.get('subject') != expected_ref:
+    # Keep schema 1 for published historical evidence. New scans require primary evidence in schema 2.
+    if report.get('schema_version') not in (1, 2) or report.get('subject') != expected_ref:
         raise ValueError('Source scan digest mismatch')
     checksum(report['database_sha256'])
     expected = components(lock, require_coverage=False)
@@ -135,7 +218,7 @@ def source_policy(report, lock, expected_ref):
             raise ValueError('Source coverage positive control failed: ' + name)
         databases.append(control['descriptor']['db'])
     seen = set()
-    blocked = []
+    blocked = primary_policy(report['primary_advisories'], lock) if report['schema_version'] == 2 else []
     for record in report['components']:
         name = record['name']
         if name in seen or name not in expected:
@@ -276,6 +359,7 @@ def check():
         write_json(OUT / 'sources.lock.json', lock)
         manifest.update(supported_version_tag=lock['image_version'], bootstrap_builder=lock['builder'], source_inventory=lock['sources'], patches=lock.get('patches', []))
         manifest['coverage_gaps'] = coverage_gaps(lock)
+        manifest['primary_advisories'] = primary_advisories(lock)
         builder = lock['builder']
         pinned = builder['image'] + '@' + builder['digest']
         if not (ROOT / 'Dockerfile').read_text().startswith('FROM ' + pinned + ' AS fetch\n'):
@@ -301,6 +385,7 @@ def check():
             if not any(f['vulnerability']['id'] == cve for f in controls[name]['matches']):
                 raise ValueError('Source coverage positive control failed: ' + name)
         fingerprint = hashlib.sha256()
+        fingerprint.update(json.dumps(manifest['primary_advisories'], sort_keys=True).encode() + b'\0')
         paths = [*ROOT.rglob('*'), Path('scripts/source_release.py'), Path('scripts/release.py'), Path('.github/workflows/source-release.yml')]
         for path in sorted(p for p in paths if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc'):
             fingerprint.update(str(path).encode() + b'\0' + path.read_bytes() + b'\0')
@@ -546,13 +631,16 @@ def build(arch, publish=True):
                 dbfiles = list((OUT / '.grype').rglob('vulnerability.db'))
                 if len(dbfiles) != 1 or sha(dbfiles[0]) != attempt['scanner']['database_sha256']:
                     raise ValueError('Native scanner database differs from preflight')
-                report = {'schema_version': 1, 'subject': ref, 'database_sha256': attempt['scanner']['database_sha256'],
+                report = {'schema_version': 2, 'subject': ref, 'database_sha256': attempt['scanner']['database_sha256'],
+                          'primary_advisories': attempt['primary_advisories'],
                           'controls': json.loads((OUT / 'coverage-controls.json').read_text()),
                           'unscanned_components': coverage_gaps(lock),
                           'components': [dict(name=name, version=s['version'], cpe=s['cpe'], report=scan(s['cpe'])) for name, s in components(lock, require_coverage=False).items()]}
                 write_json(OUT / (arch + '.cve.json'), report)
                 write_json(OUT / (arch + '.cdx.json'), sbom(lock, ref))
                 record['scan_status'] = 'partial' if coverage_gaps(lock) else 'failed'
+                record['blocked_cves'] = sorted(set(primary_policy(report['primary_advisories'], lock) +
+                    [cve for component in report['components'] for cve in cpe_policy(component['report'], component['cpe'])]))
                 blocked = source_policy(report, lock, ref)
                 findings = [f['vulnerability'] for s in report['components'] for f in s['report']['matches']]
                 counts = {s: sum(v['severity'].upper() == s for v in findings) for s in ('UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL')}
@@ -603,6 +691,9 @@ def publish():
             if checksum(record['rootfs_sha256']) != checksum(record['repeat_rootfs_sha256']):
                 raise ValueError('Missing actual repeat checksum')
             report = json.loads((OUT / (arch + '.cve.json')).read_text())
+            if 'primary_advisories' in manifest and (report.get('schema_version') != 2 or
+                    report.get('primary_advisories') != manifest['primary_advisories']):
+                raise ValueError('Primary advisory preflight binding mismatch')
             if report['database_sha256'] != manifest['scanner']['database_sha256'] or source_policy(report, lock, IMAGE + '@' + digest(record['digest'])):
                 raise ValueError('Source scan policy failed')
             for component in report['components']:

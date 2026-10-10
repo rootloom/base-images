@@ -1,0 +1,60 @@
+name: Alpine source runtime
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/alpine/**
+      - images/source-minimal/**
+      - tests/test_alpine*.py
+      - .github/workflows/alpine-source.yml
+  pull_request:
+    paths:
+      - images/alpine/**
+      - images/source-minimal/**
+      - tests/test_alpine*.py
+      - .github/workflows/alpine-source.yml
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Require a native worker
+        run: test "$(uname -m)" = "$EXPECTED_MACHINE"
+        env:
+          EXPECTED_MACHINE: ${{ matrix.machine }}
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        with:
+          version: v0.25.0
+          cache-binary: false
+          driver-opts: image=moby/buildkit@sha256:ddd1ca44b21eda906e81ab14a3d467fa6c39cd73b9a39df1196210edcb8db59e
+      - name: Two offline native source compilations
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker buildx build -f images/alpine/Source.Dockerfile --platform "linux/$ARCH" --target evidence --no-cache-filter compile --build-arg "REBUILD_NONCE=$GITHUB_RUN_ID-1" --output type=local,dest=evidence/first .
+          docker buildx build -f images/alpine/Source.Dockerfile --platform "linux/$ARCH" --target evidence --no-cache-filter compile --build-arg "REBUILD_NONCE=$GITHUB_RUN_ID-2" --output type=local,dest=evidence/second .
+          cmp evidence/first/rootfs.tar evidence/second/rootfs.tar
+          docker buildx build -f images/alpine/Source.Dockerfile --platform "linux/$ARCH" --target runtime --build-arg "REBUILD_NONCE=$GITHUB_RUN_ID-2" --load -t rootloom-alpine-source:test .
+      - name: Native non-root runtime and Alpine identity checks
+        run: |
+          SOURCE_IMAGE=rootloom-alpine-source:test python3 -m unittest discover -s tests -p test_source_image.py -v
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp rootloom-alpine-source:test /bin/sh -ec 'test "$(cat /etc/alpine-release)" = 3.24.2; test "$(id -u)" = 65532; test -f /etc/ssl/certs/ca-certificates.crt; ! command -v apk'
+      - name: State the qualification boundary
+        run: printf '%s\n' 'Source compile/runtime checks only. Advisory coverage, public source evidence, signatures, and promotion remain required. No image or latest tag was published.' >> "$GITHUB_STEP_SUMMARY"

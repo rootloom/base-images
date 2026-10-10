@@ -24,6 +24,12 @@ source verification, bootstrap decisions, acceptance gates, and next owners.
 
 ## Image Contract
 
+Executable first slices for Debian and Ubuntu are documented in
+[`docs/source-slices.md`](docs/source-slices.md).
+Alpine's pinned packaging and runtime-source preparation are documented in
+[`images/alpine/SOURCE.md`](images/alpine/SOURCE.md).
+These data/source checks do not qualify runnable images or release tags.
+
 This contract applies to all six source conversions. Distribution identity
 requires the distribution's source packaging, patches, configuration, and
 metadata. A shared BusyBox filesystem cannot stand in for five distributions.

@@ -5,3 +5,4 @@ __pycache__
 evidence
 source-evidence
 dist
+images/alpine/.work*

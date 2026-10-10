@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "image": "debian-slim",
+  "distribution": "Debian 13 (trixie)",
+  "scope": "base-files identity and license data only; not a runnable image or full package rebuild",
+  "release_qualified": false,
+  "package": "base-files",
+  "source_root": "base-files",
+  "vendor": "debian",
+  "version": "13.8+deb13u7",
+  "license": "GPL-2.0-or-later; bundled license texts retain their own notices",
+  "source_date_epoch": 1784308860,
+  "sources": [
+    {
+      "filename": "base-files_13.8+deb13u7.dsc",
+      "url": "https://deb.debian.org/debian/pool/main/b/base-files/base-files_13.8+deb13u7.dsc",
+      "size": 1247,
+      "sha256": "6240b5a02fc32bd6d925bb7776e00c467e80d930f8cf3c4a20c299ce692dc7e4"
+    },
+    {
+      "filename": "base-files_13.8+deb13u7.tar.xz",
+      "url": "https://deb.debian.org/debian/pool/main/b/base-files/base-files_13.8+deb13u7.tar.xz",
+      "size": 83444,
+      "sha256": "be32803b9408ac9aa46b96f68c83ee45e88d04d89854a87999986efc4cb34c69"
+    }
+  ],
+  "verification_inputs": [
+    {
+      "filename": "debian-base-files-key.asc",
+      "url": "https://keyring.debian.org/pks/lookup?op=get&search=0xD54C3BFAFFB042DE382DA5D741CE7F0B9F1B8B32",
+      "size": 12470,
+      "sha256": "4fd7bb7bf68fde2637afab7dda3308d9f3cf223d04be6088085cc3d1c6da8a92",
+      "fingerprint": "D54C3BFAFFB042DE382DA5D741CE7F0B9F1B8B32"
+    }
+  ],
+  "authentication": {
+    "status": "descriptor-signature-verified",
+    "evidence": "GPG verifies the descriptor with the pinned Debian developer key from Debian's official keyring server. The signed descriptor binds the archive SHA-256. Signed distribution index membership is not yet verified.",
+    "claimed_descriptor_signer": "D54C3BFAFFB042DE382DA5D741CE7F0B9F1B8B32"
+  },
+  "recipe": {
+    "upstream": "base-files/debian/rules:override_dh_auto_install",
+    "retained": ["etc/*", "licenses/*", "origins/debian", "debian/copyright"],
+    "generated": "Replace #OSNAME# with GNU/Linux; install os-release under usr/lib and create its relative etc symlink.",
+    "excluded": "MOTD scripts, shell profile templates, package metadata, maintainer scripts, directory layout, package manager, and all runtime executables."
+  }
+}
