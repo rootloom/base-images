@@ -1,5 +1,7 @@
 # Rootloom Base Images
 
+[Overview](README.md) | [Latest Images](latest.md) | [Version History](https://github.com/rootloom/base-images/releases)
+
 Slim community Linux bases for `linux/amd64` and `linux/arm64`.
 
 The initial set contains Debian slim, Red Hat UBI minimal, Alpine, Ubuntu LTS,
@@ -37,7 +39,10 @@ the exact evidence format and release policy.
 
 Each image gets its OS-version tag, `latest`, and a
 `standard-<run_id>-<attempt>` tag after qualification. Evidence releases use
-`standard-<image>-<run_id>-<attempt>`. Daily rebuilds also refresh CVE reports.
+`standard-<image>-<run_id>-<attempt>`. CI checks for updates every 15 minutes.
+Changed build inputs or vulnerability data trigger a fresh build.
+At least one daily rebuild also checks for package repository updates.
+GitHub can delay or skip scheduled jobs. This schedule is not a timing guarantee.
 Reports for older digests remain available, but are not rescanned separately.
 
 Promotion must pass runtime checks and vulnerability policy for both
@@ -50,6 +55,40 @@ New GHCR packages can default to private visibility. A package owner must
 make each package public before community release. Anonymous pulls must work
 before supported tags are promoted. GitHub Release evidence is public because
 this repository is public.
+
+## Current CVEs
+
+The table updates automatically from public evidence and the live `latest` digests.
+Failed candidates do not replace the reported current image.
+Counts describe findings per package, not unique CVE identifiers.
+A question mark means unknown data, not zero findings.
+See [Latest Images](latest.md) for digests, scan times, sizes, packages, and failed attempts.
+
+<!-- image-status:start -->
+| Image | Arch | Latest Status | Critical | High | Medium | Low | Unknown | Scan (UTC) | Evidence |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| debian-slim | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| debian-slim | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| ubi-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| ubi-minimal | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| alpine | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| alpine | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| ubuntu | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| ubuntu | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| rocky-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| rocky-minimal | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+<!-- image-status:end -->
+
+## Version Control
+
+Git records image definitions, pinned CI tools, policy changes, and status updates.
+Each build records its source commit and resolved upstream digest.
+Unique run-attempt tags retain qualified releases. Use digests for deployment and rollback.
+The OS-version tag and `latest` move only after qualification and signing.
+Public evidence remains available for failed and blocked attempts.
+Concurrent release runs do not promote images at the same time.
+Status automation commits only changed data. It does not trigger another release build.
+Package updates depend on repository state, so builds are not bit-for-bit reproducible.
 
 ## Local Builds
 

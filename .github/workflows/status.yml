@@ -1,0 +1,42 @@
+name: Public image status
+on:
+  workflow_run:
+    workflows: [Standard image release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: public-image-status
+  cancel-in-progress: false
+jobs:
+  status:
+    if: github.repository == 'rootloom/base-images'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Verify generator tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Read live tags and public evidence
+        run: python3 scripts/status.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Commit changed status only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git add README.md latest.md status.json
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: update digest-linked image status'
+          gh auth setup-git
+          git push origin HEAD:main
