@@ -1,4 +1,4 @@
-"""Standard-only builds. Public evidence must pass before mutable tags change."""
+"""Historical binary-image tooling. Legacy releases are disabled; use source_release.py."""
 
 import argparse
 import hashlib
@@ -223,7 +223,12 @@ def anonymous_registry_access(manifest):
                 raise ValueError('Anonymous registry manifest mismatch')
 
 
+def reject_legacy_release():
+    raise ValueError('Legacy binary-image release disabled: pinned-source compilation into an empty final rootfs is required; use scripts/source_release.py')
+
+
 def promote(manifest, out, repo, tag):
+    reject_legacy_release()
     registry = manifest['image']
     ref = registry + '@' + manifest['index_digest']
     anonymous_registry_access(manifest)
@@ -260,6 +265,8 @@ def promote(manifest, out, repo, tag):
 
 
 def main(mode, image):
+    if mode != 'pr':
+        reject_legacy_release()
     dockerfile = Path('images') / image / 'Dockerfile'
     if mode == 'pr':
         upstream = base_default(dockerfile.read_text())

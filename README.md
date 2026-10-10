@@ -2,55 +2,66 @@
 
 [Overview](README.md) | [Latest Images](latest.md) | [Version History](https://github.com/rootloom/base-images/releases)
 
-Slim community Linux bases for `linux/amd64` and `linux/arm64`.
+The target is six minimal source-built bases for `linux/amd64` and `linux/arm64`.
+Each final image must start with `FROM scratch`. Its distribution components
+and packages must come from compiled, verified source, not upstream binary
+images or downloaded binary packages.
 
-The initial set contains Debian slim, Red Hat UBI minimal, Alpine, Ubuntu LTS,
-and Rocky Linux minimal. Standard variants come first. These images do not
-claim FIPS validation. FIPS variants need separate validation evidence and
-redistribution review before publication.
+Conversion is unfinished. The five distribution recipes remain legacy binary
+builds. `source-minimal` is an experimental custom runtime, not a distribution
+replacement. No current image is accepted as completing this source workstream.
+See the [source conversion ledger](docs/source-build-workstream.md) for gaps,
+source verification, bootstrap decisions, acceptance gates, and next owners.
 
-| Image | Upstream Base | Architectures |
+| Image | Target Identity | Architectures |
 | --- | --- | --- |
 | `debian-slim` | Debian 13 slim | amd64, arm64 |
 | `ubi-minimal` | Red Hat UBI 9.7 minimal | amd64, arm64 |
 | `alpine` | Alpine 3.24 | amd64, arm64 |
 | `ubuntu` | Ubuntu 24.04 LTS | amd64, arm64 |
 | `rocky-minimal` | Rocky Linux 9 minimal | amd64, arm64 |
+| `source-minimal` | Custom musl/BusyBox runtime | amd64, arm64 |
 
 ## Image Contract
 
-The five distribution images below use upstream binary images. They are not
-source rebuilds. The separate source-build track does not replace them or
-claim their distribution compatibility.
+This contract applies to all six source conversions. Distribution identity
+requires the distribution's source packaging, patches, configuration, and
+metadata. A shared BusyBox filesystem cannot stand in for five distributions.
 
 - Images use the non-root user `rootloom`, with UID and GID `65532`.
 - `/app` and `/home/rootloom` are writable by that user.
-- Images include CA certificates and a shell. They keep package metadata for scans.
-- Builds apply package updates and remove package download caches in the same layer.
-- Downstream builds can use `USER 0` to install packages, then restore `USER 65532:65532`.
+- Images include CA trust data and a shell. They keep truthful component metadata for scans.
+- Compile all shipped binaries from pinned source. Record generated files and non-code data separately.
+- Exclude bootstrap binaries and build tools from the final root filesystem.
+- Do not promise package installation until each distribution's source-built package manager is qualified.
 - Use an image digest for deployments. Version tags and `latest` can change.
+- No image claims FIPS validation. FIPS variants require separate module, environment, license, and runtime evidence.
 
 ## Publication
 
-GitHub Actions builds both architectures and publishes images to
-`ghcr.io/rootloom/<image>`. Pull requests do not receive publishing credentials.
-Scheduled builds refresh upstream inputs and vulnerability data.
+The intended registry is `ghcr.io/rootloom/<image>`. Pull requests must not
+receive publishing credentials. Legacy binary releases are not an accepted
+delivery path. Their historical tags and evidence do not prove source conversion.
+Source admission must pass before registry writes or promotion.
+The local legacy release guard rejects release and direct promotion calls.
+Its scheduled/push triggers are removed, and its manual workflow job is disabled.
+Remote enforcement requires integration of these changes; this is not a publication claim.
 
 Each published image has public GitHub Release evidence. This includes
 platform digests, SPDX SBOMs, raw CVE reports, checksums, scan metadata,
 the source commit, and the workflow URL. Review the workflow and scripts for
 the exact evidence format and release policy.
 
-Each image gets its OS-version tag, `latest`, and a
-`standard-<run_id>-<attempt>` tag after qualification. Evidence releases use
-`standard-<image>-<run_id>-<attempt>`. CI checks for updates every 15 minutes.
-Changed build inputs or vulnerability data trigger a fresh build.
-At least one daily rebuild also checks for package repository updates.
-GitHub can delay or skip scheduled jobs. This schedule is not a timing guarantee.
-Reports for older digests remain available, but are not rescanned separately.
+Historical distribution evidence uses `standard-<image>-<run_id>-<attempt>`.
+Those releases describe binary-based candidates. They are not source releases.
+Source-minimal evidence uses `source-source-minimal-<run_id>-<attempt>`.
+Extending source evidence to the other five images remains implementation work.
+Version tags and `latest` must move only after source qualification, signing,
+and public verification. Use immutable digests for deployment and rollback.
 
 Promotion must pass runtime checks and vulnerability policy for both
-architectures. Fixable High or Critical findings block promotion. Failed scans
+architectures. All High or Critical source findings block promotion, including
+findings without fix metadata. Failed scans
 are failures, not empty CVE reports. Other findings remain visible in the reports.
 No image can guarantee that it has no CVEs. Reports describe scanner coverage
 and known vulnerabilities at the recorded scan time.
@@ -74,12 +85,16 @@ Compiler-rt builtins coverage remains unresolved and blocks promotion.
 Current component matches also block the vulnerability policy. Do not treat
 an experimental candidate as a supported release.
 
-Revision `r2` pins and applies the upstream musl `CVE-2026-40200` patch.
-Local arm64 tests and repeat builds support development only. Community release
-requires hosted qualification and public image evidence. BusyBox affected-code
-review, compiler-rt coverage, and native worker enforcement remain unfinished.
-No finding was suppressed. Experimental source work does not prevent independent
-standard image releases.
+The current `r3` lock pins BusyBox `1.37.0` and musl patches.
+Compiler-rt coverage and the reported musl finding remain unresolved release
+gates. An updated lock or a skipped workflow is not qualification.
+Community release requires native hosted builds and matching public evidence.
+No finding may be suppressed to make conversion appear complete.
+
+The user approved a pinned prebuilt compiler only for bootstrap.
+Every shipped executable and library must compile from verified source.
+The existing builder is digest-pinned GCC `15.2.0`.
+A full source compiler bootstrap is not implemented or claimed.
 
 The factory must publish reviewed changes to this repository and use GitHub
 Actions for release builds. Local-only results are not accepted delivery.
@@ -90,7 +105,7 @@ unfinished work until the public delivery checks pass.
 The source-build contract requires these controls:
 
 - Pin source archive URLs, versions, checksums, and licenses in a reviewed lock file.
-- Disclose the digest-pinned bootstrap compiler image. This is not a full compiler bootstrap.
+- Disclose all bootstrap inputs. Prevent prebuilt runtime objects from shipping and trace contributing headers to source.
 - Fetch inputs before compilation. Compile without network access.
 - Copy only required runtime files into the scratch image. Exclude build tools.
 - Test the non-root runtime on both architectures.
@@ -115,10 +130,11 @@ GitHub Release, not Actions artifacts. Each architecture uploads one source
 bundle. The final job removes the temporary scanner database before public
 publication. Failed or blocked evidence does not authorize tag promotion.
 
-Source-building the five distributions is separate work. Copying their binary
-packages into a scratch image is root filesystem assembly, not source compilation.
-Do not use source-build labels for those images until their complete build inputs
-and release checks support the claim.
+All six directories belong to this source conversion workstream. Copying
+downloaded binary packages into scratch is assembly, not source compilation.
+Do not use source-build labels until complete source closure and release
+evidence support the claim. Existing checks are reusable, but do not yet
+implement source closure for the five distributions.
 
 ## Current CVEs
 
@@ -148,26 +164,21 @@ See [Latest Images](latest.md) for digests, scan times, sizes, packages, and fai
 ## Version Control
 
 Git records image definitions, pinned CI tools, policy changes, and status updates.
-Each build records its source commit and resolved upstream digest.
+Each accepted source build must record its commit, source lock, and bootstrap identity.
 Unique run-attempt tags retain qualified releases. Use digests for deployment and rollback.
 The OS-version tag and `latest` move only after qualification and signing.
 Public evidence remains available for failed and blocked attempts.
 Concurrent release runs do not promote images at the same time.
 Status automation commits only changed data. It does not trigger another release build.
-Package updates depend on repository state, so builds are not bit-for-bit reproducible.
+Legacy binary package updates are time-dependent. Source conversion requires
+immutable inputs and measured repeat-rootfs equality for each architecture.
 
 ## Local Builds
 
-Build one image with Docker:
-
-```sh
-docker build --pull -t rootloom-local images/debian-slim
-docker run --rm rootloom-local sh -ec 'test "$(id -u)" = 65532; test -w /app; test -s /etc/ssl/certs/ca-certificates.crt'
-```
-
-Use Docker Buildx for multi-platform builds. Local builds need network access
-to upstream registries and package repositories. Package updates make builds
-time-dependent, even when the upstream image digest is fixed.
+The five legacy Dockerfiles do not test the requested source-build target.
+Do not treat a local build as release qualification. Use the approved
+bootstrap-only boundary. Source qualification uses
+native amd64 and arm64 runners, not emulated runtime tests.
 
 Run the release-policy tests from the repository root:
 

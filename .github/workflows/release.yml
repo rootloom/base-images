@@ -1,9 +1,5 @@
-name: Standard image release
+name: Legacy binary image release (disabled)
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
 permissions: {}
 concurrency:
@@ -11,7 +7,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.repository == 'rootloom/base-images' && github.ref == 'refs/heads/main'
+    # Retain historical steps, but never build, sign, or promote binary images.
+    # Source releases use source-release.yml and its independent security gates.
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:

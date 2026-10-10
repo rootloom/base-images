@@ -16,6 +16,45 @@ REF = 'ghcr.io/rootloom/alpine@' + DIGEST
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_legacy_release_rejected_before_any_external_operation(self):
+        for event in ('schedule', 'push', 'workflow_dispatch'):
+            for image in (*release.IMAGES, 'source-minimal'):
+                with self.subTest(event=event, image=image), \
+                     patch.dict(os.environ, {'GITHUB_EVENT_NAME': event,
+                                            'GITHUB_REPOSITORY': 'rootloom/base-images',
+                                            'GITHUB_REF': 'refs/heads/main'}), \
+                     patch.object(release, 'run') as command, \
+                     patch.object(release.subprocess, 'run') as login, \
+                     patch.object(release, 'urlopen') as http, \
+                     patch.object(release.Path, 'mkdir') as mkdir, \
+                     patch.object(release.Path, 'read_text') as read:
+                    with self.assertRaisesRegex(ValueError, 'Legacy binary-image release disabled'):
+                        release.main('release', image)
+                    for operation in (command, login, http, mkdir, read):
+                        operation.assert_not_called()
+
+    def test_legacy_direct_promotion_rejected_even_with_passed_evidence(self):
+        _, manifest, _ = self.evidence()
+        with patch.object(release, 'run') as command, \
+             patch.object(release, 'anonymous_registry_access') as public, \
+             patch.object(release, 'write_json') as write:
+            with self.assertRaisesRegex(ValueError, 'Legacy binary-image release disabled'):
+                release.promote(manifest, Path('evidence'), 'rootloom/base-images', 'standard-alpine-1-1')
+            for operation in (command, public, write):
+                operation.assert_not_called()
+
+    def test_legacy_workflow_disabled_and_pr_does_not_qualify_binary_images(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/release.yml').read_text()
+        self.assertIn('  workflow_dispatch:', workflow)
+        self.assertIn('    if: ${{ false }}', workflow)
+        self.assertNotIn('  schedule:', workflow)
+        self.assertNotIn('  push:', workflow)
+        pr = (root / '.github/workflows/pr.yml').read_text()
+        self.assertIn('python3 -m unittest discover -s tests -v', pr)
+        self.assertNotIn('scripts/release.py pr', pr)
+        self.assertNotIn('matrix:', pr)
+
     def evidence(self):
         inputs = {'build_sha256': 'a' * 64, 'upstream_reference': 'alpine:3.24',
                   'upstream_digest': DIGEST, 'scanner_version': '0.75.0',
@@ -81,7 +120,8 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'checksum'):
                 release.promoted_evidence('rootloom/base-images', 'alpine')
 
-    def test_promotion_record_only_after_all_gates(self):
+    @patch.object(release, 'reject_legacy_release')
+    def test_historical_promotion_record_only_after_all_gates(self, admission):
         _, manifest, _ = self.evidence()
         manifest['platforms']['amd64']['digest'] = 'sha256:' + 'b' * 64
         manifest['platforms']['arm64']['digest'] = 'sha256:' + 'c' * 64
@@ -135,7 +175,8 @@ class ReleaseTests(unittest.TestCase):
                         self.assertEqual(len(record['signature_verification']['digests']), 3)
                         verified.assert_called_once()
 
-    def test_scheduled_skip_and_forced_refresh(self):
+    @patch.object(release, 'reject_legacy_release')
+    def test_historical_scheduled_skip_and_forced_refresh(self, admission):
         root = Path(__file__).resolve().parents[1]
         texts = {path: (root / path).read_text() for path in ('scripts/release.py', '.github/workflows/release.yml')}
         index = {'manifests': [{'digest': DIGEST, 'platform': {'os': 'linux', 'architecture': arch}} for arch in release.ARCHES]}
@@ -334,10 +375,12 @@ class ReleaseTests(unittest.TestCase):
             path.write_bytes(b'abc')
             self.assertEqual(release.sha(path), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
 
-    def test_scanner_failure_publishes_failed_evidence_without_promotion(self):
+    @patch.object(release, 'reject_legacy_release')
+    def test_historical_scanner_failure_publishes_failed_evidence_without_promotion(self, admission):
         self.failed_evidence(False)
 
-    def test_upstream_failure_publishes_failed_evidence_without_promotion(self):
+    @patch.object(release, 'reject_legacy_release')
+    def test_historical_upstream_failure_publishes_failed_evidence_without_promotion(self, admission):
         self.failed_evidence(True)
 
     def failed_evidence(self, upstream_failure):
