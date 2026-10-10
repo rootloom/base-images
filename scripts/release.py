@@ -90,8 +90,11 @@ def sha(path):
 
 
 def inspect(ref):
-    value = digest(run('docker', 'buildx', 'imagetools', 'inspect', ref,
-                       '--format', '{{.Manifest.Digest}}'))
+    summary = run('docker', 'buildx', 'imagetools', 'inspect', ref)
+    match = re.search(r'^Digest:\s+(sha256:[0-9a-f]{64})\s*$', summary, re.M)
+    if not match:
+        raise ValueError('Registry index digest is missing')
+    value = digest(match[1])
     raw = run('docker', 'buildx', 'imagetools', 'inspect', ref.split('@')[0] + '@' + value, '--raw')
     return value, json.loads(raw)
 

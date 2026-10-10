@@ -62,6 +62,16 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             release.digest('latest')
 
+    def test_inspect_registry_digest(self):
+        index = {'manifests': []}
+        summary = 'Name: alpine:3.24\nDigest: ' + DIGEST + '\n'
+        with patch.object(release, 'run', side_effect=[summary, release.json.dumps(index)]) as command:
+            self.assertEqual(release.inspect('alpine:3.24'), (DIGEST, index))
+            self.assertEqual(command.call_args.args[-2:], ('alpine:3.24@' + DIGEST, '--raw'))
+        with patch.object(release, 'run', return_value='Digest: <no value>'):
+            with self.assertRaises(ValueError):
+                release.inspect('alpine:3.24')
+
     def test_duplicate_platform(self):
         entry = {'digest': DIGEST, 'platform': {'os': 'linux', 'architecture': 'amd64'}}
         with self.assertRaises(ValueError):
