@@ -20,6 +20,21 @@ SOURCES = (
         ("gawk_5.2.1.orig.tar.xz", "2337a0283b180ec1b9c727973a34781c6478b3ae9bcbdcca0a4dc49861d75a65"),
         ("gawk_5.2.1-2.debian.tar.xz", "ae031782d073e8d1670b4d9ced47b3adecde2f314d824339673d163ba7029f4b"),
         ("debian-gawk-source-key.asc", "07d2894e7e3de86e8fa5a0368e4db74bff0fe0803e96aebba8716b4b28c60f86"))),
+    ("autoconf", "2.69-3.1", "autoconf-2.69", "3AFA757FAC6EA11D2FF45DF088D24287A2D898B1", (
+        ("autoconf2.69_2.69-3.1.dsc", "226b5d3e8172f6a87400cab2df0e3a8484ef44f19c052cc4edbb778c7d45f43f"),
+        ("autoconf2.69_2.69.orig.tar.xz", "64ebcec9f8ac5b2487125a86a7760d2591ac9e1d3dbd59489633f9de62a57684"),
+        ("autoconf2.69_2.69-3.1.debian.tar.xz", "fe908dbfc5669ff63fccefa9ec1affc11b6c07a6781028baee7ced77f4f0c2fb"),
+        ("debian-gawk-source-key.asc", "07d2894e7e3de86e8fa5a0368e4db74bff0fe0803e96aebba8716b4b28c60f86"))),
+    ("quilt", "0.68-1", "quilt-0.68", "D1CB8F39BC5DED24C5D2C78C1302F1F036EBEB19", (
+        ("quilt_0.68-1.dsc", "3202ab7bf40fd893a1e39b366ec3f637eb3d3e2bf2333c7994874a953024f908"),
+        ("quilt_0.68.orig.tar.gz", "fe8c09de03c106e85b3737c8f03ade147c956b79ed7af485a1c8a3858db38426"),
+        ("quilt_0.68-1.debian.tar.xz", "ab560660e93a5d658f3a6300054b91e8a566b6933e14e17dad6a856d7693c2b9"),
+        ("debian-quilt-source-key.asc", "344f9e8f82367e035f201d2d553180dd8e4b56ac4ba408b4f5bd7ef20cc81270"))),
+    ("patchutils", "0.4.2-1", "patchutils-0.4.2", "7D887DC8BA7BBBA7B835E3BADCE310E7864CC8BF", (
+        ("patchutils_0.4.2-1.dsc", "f7b18896c30d7a78516a23cdf651ce913774fa401ae0f3e2d6666a5ee9621031"),
+        ("patchutils_0.4.2.orig.tar.gz", "2ff95f11946558ce63f4d1167abaccbffd49750152346d5304e03ad884304ad6"),
+        ("patchutils_0.4.2-1.debian.tar.xz", "2c5ba4449cbc472d2d9395c6f618c7e12e7d8760834033ea85bd2bd249e691ea"),
+        ("debian-patchutils-source-key.asc", "e6d6acf96e7fbaa752d603fc43b5f96eea06045f53b9c4367a1864519eaff3c2"))),
     ("linux", "6.12.107-1", "linux-6.12.107", "4644409808C171E05531DDEE054CB8F31343CF44", (
         ("linux_6.12.107-1.dsc", "00f5874a383295a3237321cf59a0f172495084f16cb3dac24ee5aae6649d809a"),
         ("linux_6.12.107.orig.tar.xz", "efc76d3c78a5d65f42724118c437d11db1c9f6309a5f024ee9a8b1978fdc6919"),
@@ -47,7 +62,7 @@ def main():
             data = (inputs / filename).read_bytes()
             if hashlib.sha256(data).hexdigest() != expected:
                 raise ValueError("Source checksum mismatch: " + filename)
-            if filename.endswith(".tar.xz") and not re.search(
+            if ".tar." in filename and not re.search(
                     rf"^ {expected} {len(data)} {re.escape(filename)}$", descriptor, re.MULTILINE):
                 raise ValueError("Descriptor does not bind archive: " + filename)
         home = directory / "gnupg"
@@ -96,12 +111,20 @@ def main():
             commands.insert(0, ["autoreconf", "-fi"])
         if name == "gawk":
             commands[0] += ["--without-readline", "--without-mpfr"]
+        if name == "autoconf":
+            commands = [[str(source / "configure"), "--prefix=/bootstrap", "--program-suffix=2.69"]]
+        if name == "quilt":
+            commands[0] += ["--with-awk=/bootstrap/bin/gawk", "--with-bash=/bin/bash"]
+        if name == "patchutils":
+            commands.insert(0, ["autoreconf", "-fi"])
         if name == "glibc":
             work = directory / "objects"
             work.mkdir()
             commands = [[str(source / "configure"), "--prefix=/usr", "--disable-werror", "--without-selinux",
                          "--with-headers=/build/linux/linux-6.12.107/usr/include"]]
         commands.append(["make", "-j2"])
+        if name == "autoconf":
+            commands[-1].append("pkgdatadir=/bootstrap/share/autoconf2.69")
         if name == "bison":
             commands[-1].append("INFO_DEPS=")
             commands.append(["make", "install-binPROGRAMS", "install-dist_pkgdataDATA",
@@ -113,7 +136,9 @@ def main():
         elif name == "linux":
             architecture = {"aarch64": "arm64", "x86_64": "x86"}[os.uname().machine]
             commands = [["make", "-j2", "headers", "ARCH=" + architecture]]
-        elif name != "glibc":
+        elif name == "autoconf":
+            commands.append(["make", "install", "pkgdatadir=/bootstrap/share/autoconf2.69"])
+        elif name in ("quilt", "patchutils"):
             commands.append(["make", "install"])
         record["sources"].append({"name": name, "version": version, "materials": dict(materials),
                                   "signing_fingerprint": signer, "primary_fingerprint": signatures[0][-1],

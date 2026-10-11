@@ -25,7 +25,7 @@ class GnuBootstrapTests(unittest.TestCase):
                 with self.subTest(component=name, filename=filename):
                     data = (inputs / filename).read_bytes()
                     self.assertEqual(hashlib.sha256(data).hexdigest(), expected)
-                    if filename.endswith(".tar.xz"):
+                    if ".tar." in filename:
                         self.assertRegex(descriptor, re.compile(
                             rf"^ {expected} {len(data)} {re.escape(filename)}$", re.MULTILINE))
 

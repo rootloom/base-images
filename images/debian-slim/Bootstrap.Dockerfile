@@ -3,6 +3,9 @@ FROM docker.io/library/gcc:15.2.0@sha256:3ae15afe768b06d0c0fe088d822ba5f8045c266
 COPY images/debian-slim/bootstrap.py /recipe/bootstrap.py
 COPY --from=inputs bison_3.8.2+dfsg-1.dsc bison_3.8.2+dfsg.orig.tar.xz bison_3.8.2+dfsg-1.debian.tar.xz debian-bison-source-key.asc /inputs/
 COPY --from=inputs gawk_5.2.1-2.dsc gawk_5.2.1.orig.tar.xz gawk_5.2.1-2.debian.tar.xz debian-gawk-source-key.asc /inputs/
+COPY --from=inputs autoconf2.69_2.69-3.1.dsc autoconf2.69_2.69.orig.tar.xz autoconf2.69_2.69-3.1.debian.tar.xz /inputs/
+COPY --from=inputs quilt_0.68-1.dsc quilt_0.68.orig.tar.gz quilt_0.68-1.debian.tar.xz debian-quilt-source-key.asc /inputs/
+COPY --from=inputs patchutils_0.4.2-1.dsc patchutils_0.4.2.orig.tar.gz patchutils_0.4.2-1.debian.tar.xz debian-patchutils-source-key.asc /inputs/
 COPY --from=inputs glibc_2.41-12+deb13u4.dsc glibc_2.41.orig.tar.xz glibc_2.41-12+deb13u4.debian.tar.xz debian-glibc-source-key.asc /inputs/
 COPY --from=inputs linux_6.12.107-1.dsc linux_6.12.107.orig.tar.xz linux_6.12.107-1.debian.tar.xz debian-linux-source-key.asc /inputs/
 ENV PYTHONDONTWRITEBYTECODE=1 PATH=/bootstrap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
