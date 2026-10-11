@@ -48,6 +48,30 @@ SOURCES = (
 )
 
 
+def verify_source(inputs, directory, signer, materials):
+    descriptor = (inputs / materials[0][0]).read_text()
+    for filename, expected in materials:
+        data = (inputs / filename).read_bytes()
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError("Source checksum mismatch: " + filename)
+        if ".tar." in filename and not re.search(
+                rf"^ {expected} {len(data)} {re.escape(filename)}$", descriptor, re.MULTILINE):
+            raise ValueError("Descriptor does not bind archive: " + filename)
+    home = directory / "gnupg"
+    home.mkdir(mode=0o700)
+    subprocess.run(["gpg", "--no-options", "--homedir", str(home), "--batch", "--dearmor",
+                    "--output", str(home / "key.gpg"), str(inputs / materials[3][0])], check=True)
+    signature = subprocess.run([
+        "gpg", "--no-options", "--homedir", str(home), "--batch", "--no-auto-key-retrieve",
+        "--no-default-keyring", "--keyring", str(home / "key.gpg"), "--status-fd", "1",
+        "--verify", str(inputs / materials[0][0])], check=True, capture_output=True, text=True)
+    signatures = [line.split() for line in signature.stdout.splitlines()
+                  if line.startswith("[GNUPG:] VALIDSIG ")]
+    if len(signatures) != 1 or signatures[0][2] != signer:
+        raise ValueError("Unexpected source descriptor signer")
+    return signatures[0][-1]
+
+
 def main():
     inputs, build, evidence = Path("/inputs"), Path("/build"), Path("/evidence")
     build.mkdir()
@@ -57,26 +81,7 @@ def main():
     for name, version, root, signer, materials in SOURCES:
         directory = build / name
         directory.mkdir()
-        descriptor = (inputs / materials[0][0]).read_text()
-        for filename, expected in materials:
-            data = (inputs / filename).read_bytes()
-            if hashlib.sha256(data).hexdigest() != expected:
-                raise ValueError("Source checksum mismatch: " + filename)
-            if ".tar." in filename and not re.search(
-                    rf"^ {expected} {len(data)} {re.escape(filename)}$", descriptor, re.MULTILINE):
-                raise ValueError("Descriptor does not bind archive: " + filename)
-        home = directory / "gnupg"
-        home.mkdir(mode=0o700)
-        subprocess.run(["gpg", "--no-options", "--homedir", str(home), "--batch", "--dearmor",
-                        "--output", str(home / "key.gpg"), str(inputs / materials[3][0])], check=True)
-        signature = subprocess.run([
-            "gpg", "--no-options", "--homedir", str(home), "--batch", "--no-auto-key-retrieve",
-            "--no-default-keyring", "--keyring", str(home / "key.gpg"), "--status-fd", "1",
-            "--verify", str(inputs / materials[0][0])], check=True, capture_output=True, text=True)
-        signatures = [line.split() for line in signature.stdout.splitlines()
-                      if line.startswith("[GNUPG:] VALIDSIG ")]
-        if len(signatures) != 1 or signatures[0][2] != signer:
-            raise ValueError("Unexpected source descriptor signer")
+        primary = verify_source(inputs, directory, signer, materials)
         for filename, _ in materials[1:3]:
             with tarfile.open(inputs / filename) as archive:
                 archive.extractall(directory if filename == materials[1][0] else directory / root, filter="data")
@@ -141,7 +146,7 @@ def main():
         elif name in ("quilt", "patchutils"):
             commands.append(["make", "install"])
         record["sources"].append({"name": name, "version": version, "materials": dict(materials),
-                                  "signing_fingerprint": signer, "primary_fingerprint": signatures[0][-1],
+                                  "signing_fingerprint": signer, "primary_fingerprint": primary,
                                   "patches": patch_records, "commands": commands, "completed": False})
         (evidence / "bootstrap.json").write_text(json.dumps(record, indent=2) + "\n")
         with (evidence / (name + ".build.log")).open("wb") as log:

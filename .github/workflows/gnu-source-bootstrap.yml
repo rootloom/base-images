@@ -1,0 +1,70 @@
+name: GNU source bootstrap
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/debian-slim/Bootstrap.Dockerfile
+      - images/debian-slim/*bootstrap.py
+      - images/debian-slim/source-keys.tar.gz
+      - scripts/gnu_bootstrap_inputs.py
+      - tests/test_gnu_bootstrap.py
+      - .github/workflows/gnu-source-bootstrap.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Require native execution
+        env:
+          EXPECTED_MACHINE: ${{ matrix.machine }}
+        run: test "$(uname -m)" = "$EXPECTED_MACHINE"
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        with:
+          version: v0.25.0
+          cache-binary: false
+          driver-opts: image=moby/buildkit@sha256:ddd1ca44b21eda906e81ab14a3d467fa6c39cd73b9a39df1196210edcb8db59e
+      - name: Acquire checksum-locked source inputs
+        run: python3 scripts/gnu_bootstrap_inputs.py --inputs evidence/inputs
+      - name: Check real input hashes, signatures, and prerequisite bindings
+        env:
+          GNU_BOOTSTRAP_INPUTS: evidence/inputs
+        run: python3 -m unittest discover -s tests -p test_gnu_bootstrap.py -v
+      - name: Compile GNU source bootstrap offline
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: docker buildx build -f images/debian-slim/Bootstrap.Dockerfile --platform "linux/$ARCH" --build-context inputs=evidence/inputs --target compiler-evidence --output type=local,dest=evidence/result --progress plain .
+      - name: Verify completed native evidence remains unqualified
+        env:
+          GNU_BOOTSTRAP_INPUTS: evidence/inputs
+          GNU_BOOTSTRAP_EVIDENCE: evidence/result
+          GNU_COMPILER_EVIDENCE: evidence/result
+        run: python3 -m unittest discover -s tests -p test_gnu_bootstrap.py -v
+      - name: State release boundary
+        if: always()
+        run: printf '%s\n' 'Temporary source bootstrap only. Final header/object provenance, runtime qualification, security coverage, public release evidence, and latest promotion remain required. No image or latest tag was published.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain bootstrap receipts and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gnu-bootstrap-${{ matrix.arch }}
+          path: evidence/result
+          if-no-files-found: error
+          retention-days: 14

@@ -11,6 +11,16 @@ COPY --from=inputs linux_6.12.107-1.dsc linux_6.12.107.orig.tar.xz linux_6.12.10
 ENV PYTHONDONTWRITEBYTECODE=1 PATH=/bootstrap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 RUN --network=none python3 /recipe/bootstrap.py
 
+FROM bootstrap AS gnu-compiler
+COPY images/debian-slim/gcc_bootstrap.py /recipe/gcc_bootstrap.py
+COPY --from=inputs gcc-14_14.2.0-19.dsc gcc-14_14.2.0.orig.tar.gz gcc-14_14.2.0-19.debian.tar.xz debian-gcc-source-key.asc /inputs/
+COPY --from=inputs gmp-6.2.1.tar.bz2 mpfr-4.1.0.tar.bz2 mpc-1.2.1.tar.gz /inputs/
+RUN --network=none ln -s /bootstrap/bin/autom4te2.69 /usr/bin/autom4te2.69
+RUN --network=none python3 /recipe/gcc_bootstrap.py
+
+FROM scratch AS compiler-evidence
+COPY --from=gnu-compiler /evidence/ /
+
 # Export build records only. Bootstrap objects and headers are not release inputs.
 FROM scratch AS evidence
 COPY --from=bootstrap /evidence/ /
