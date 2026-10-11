@@ -8,6 +8,8 @@ import compiler
 
 
 def main(args):
+    existing_map = None
+    retained_map = None
     if "-c" in args and "-o" in args and "-" in args and "-x" in args:
         language = args[args.index("-x") + 1]
         if language == "assembler":
@@ -23,8 +25,14 @@ def main(args):
             maps = Path("/evidence/sources/link-maps")
             maps.mkdir(parents=True, exist_ok=True)
             key = hashlib.sha256(str(output).encode()).hexdigest()
-            args = [*args, "-Wl,-Map=" + str(maps / (key + ".map"))]
+            retained_map = maps / (key + ".map")
+            existing_map = next((Path(item[len("-Wl,-Map,"):]) for item in args
+                                 if item.startswith("-Wl,-Map,")), None)
+            if existing_map is None:
+                args = [*args, "-Wl,-Map=" + str(retained_map)]
     compiler.main(args)
+    if existing_map is not None:
+        retained_map.write_bytes(existing_map.read_bytes())
 
 
 if __name__ == "__main__":

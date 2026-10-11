@@ -27,6 +27,15 @@ with patch.dict(sys.modules, {"compiler": compiler}):
 
 
 class SourceOrigins(unittest.TestCase):
+    def test_gnu_vendor_link_map_is_preserved_and_copied(self):
+        arguments = ["-r", "-o", "/build/partial.o", "-Wl,-Map,/build/vendor.mapT"]
+        with patch.object(trace.compiler, "main") as run, patch.object(Path, "mkdir"), \
+                patch.object(Path, "read_bytes", return_value=b"LOAD object.o\n"), \
+                patch.object(Path, "write_bytes") as write:
+            trace.main(arguments)
+        run.assert_called_once_with(arguments)
+        write.assert_called_once_with(b"LOAD object.o\n")
+
     def test_gnu_stdin_assembly_is_retained_before_tracing(self):
         arguments = ["-c", "-x", "assembler", "-", "-o", "/build/stubs.o"]
         with patch.object(trace.sys, "stdin") as stream, patch.object(Path, "write_bytes") as write, \
