@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -26,6 +27,15 @@ with patch.dict(sys.modules, {"compiler": compiler}):
 
 
 class SourceOrigins(unittest.TestCase):
+    def test_gnu_stdin_assembly_is_retained_before_tracing(self):
+        arguments = ["-c", "-x", "assembler", "-", "-o", "/build/stubs.o"]
+        with patch.object(trace.sys, "stdin") as stream, patch.object(Path, "write_bytes") as write, \
+                patch.object(trace.compiler, "main") as run:
+            stream.buffer = io.BytesIO(b".globl malloc\nmalloc:\n")
+            trace.main(arguments)
+        write.assert_called_once_with(b".globl malloc\nmalloc:\n")
+        run.assert_called_once_with(["-c", "-x", "assembler", "/build/stubs.o.stdin.s", "-o", "/build/stubs.o"])
+
     def test_dependency_phony_targets_are_not_compiler_inputs(self):
         text = "object.o: /source.c \\\n /header.h\n/header.h:\n"
         self.assertEqual(compiler.dependency_inputs(text), [Path("/source.c"), Path("/header.h")])
