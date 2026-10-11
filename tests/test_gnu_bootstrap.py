@@ -1,12 +1,16 @@
 """Check real GNU bootstrap inputs and native build evidence when supplied."""
 
 import hashlib
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import importlib.util
 import json
+import lzma
 import os
 from pathlib import Path
 import re
 import sys
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -61,6 +65,55 @@ class GnuBootstrapTests(unittest.TestCase):
         for filename in GCC.PREREQUISITES:
             with self.subTest(filename=filename):
                 self.assertEqual(hashlib.sha512((inputs / filename).read_bytes()).hexdigest(), expected[filename])
+
+    @unittest.skipUnless(os.environ.get("DEBIAN_INDEX_EVIDENCE") and os.environ.get("GNU_BOOTSTRAP_INPUTS"),
+                         "Signed Debian indexes and real GNU inputs are required")
+    def test_signed_distribution_index_membership(self):
+        evidence = Path(os.environ["DEBIAN_INDEX_EVIDENCE"]).resolve()
+        inputs = Path(os.environ["GNU_BOOTSTRAP_INPUTS"])
+        roles = {
+            "trixie-current": {"B8B80B5B623EAB6AD8775C45B7C5D7D6350947F8",
+                               "04B54C3CDCA79751B16BC6B5225629DF75B188BD",
+                               "41587F7DB8C774BCCF131416762F67A0B2C39DE4"},
+            "trixie-security-current": {"05AB90340C0C5E797F44A8C8254CF3B5AEC0A8F0",
+                                        "5E04A1E3223A19A20706E20F9904613D4CCE68C6"},
+        }
+        records = []
+        for prefix, expected_signers in roles.items():
+            with tempfile.TemporaryDirectory() as temporary:
+                plaintext = Path(temporary) / "Release"
+                result = subprocess.run([
+                    "gpg", "--no-options", "--batch", "--homedir", temporary, "--no-default-keyring",
+                    "--keyring", str(evidence / "debian-index-verification.gpg"), "--status-fd", "1",
+                    "--output", str(plaintext), "--decrypt", str(evidence / (prefix + "-InRelease"))],
+                    check=True, capture_output=True, text=True)
+                signers = {line.split()[-1] for line in result.stdout.splitlines()
+                           if line.startswith("[GNUPG:] VALIDSIG ")}
+                self.assertEqual(signers, expected_signers)
+                index = (evidence / (prefix + "-Sources.xz")).read_bytes()
+                release = plaintext.read_text()
+                expiry = re.search(r"^Valid-Until: (.+)$", release, re.MULTILINE)
+                if prefix == "trixie-security-current":
+                    self.assertIsNotNone(expiry, "Security index must declare its expiry")
+                if expiry:
+                    self.assertGreater(parsedate_to_datetime(expiry.group(1)), datetime.now(timezone.utc))
+                self.assertRegex(release, re.compile(
+                    rf"^ {hashlib.sha256(index).hexdigest()} +{len(index)} main/source/Sources\.xz$", re.MULTILINE))
+                records.extend(lzma.decompress(index).decode().split("\n\n"))
+        sources = (*BOOTSTRAP.SOURCES, ("gcc", "14.2.0-19", "", GCC.SIGNER, GCC.MATERIALS))
+        for name, version, _, _, materials in sources:
+            with self.subTest(component=name):
+                descriptor = (inputs / materials[0][0]).read_text()
+                package = re.search(r"^Source: (.+)$", descriptor, re.MULTILINE).group(1)
+                publisher_version = re.search(r"^Version: (.+)$", descriptor, re.MULTILINE).group(1)
+                self.assertEqual(publisher_version.split(":", 1)[-1], version)
+                candidates = [record for record in records
+                              if re.search(rf"^Package: {re.escape(package)}$", record, re.MULTILINE)
+                              and re.search(rf"^Version: {re.escape(publisher_version)}$", record, re.MULTILINE)]
+                self.assertTrue(candidates, "Source version is absent from signed indexes")
+                self.assertTrue(any(all(re.search(rf"^ {digest} +\d+ {re.escape(filename)}$", record, re.MULTILINE)
+                                            for filename, digest in materials[:3]) for record in candidates),
+                                "Signed index does not bind all locked source archives")
 
     @unittest.skipUnless(os.environ.get("GNU_COMPILER_EVIDENCE"), "Native GNU compiler evidence is required")
     def test_native_compiler_stays_unqualified(self):
