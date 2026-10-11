@@ -31,11 +31,11 @@ with patch.dict(sys.modules, {"bootstrap": BOOTSTRAP}):
 
 class GnuBootstrapTests(unittest.TestCase):
     def constant_runtime(self):
-        from test_source_origins import headers, origins
+        from test_source_origins import compiler, headers, origins
 
         spec = importlib.util.spec_from_file_location("gnu_runtime", ROOT / "images/debian-slim/runtime.py")
         runtime = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"headers": headers, "origins": origins}):
+        with patch.dict(sys.modules, {"compiler": compiler, "headers": headers, "origins": origins}):
             spec.loader.exec_module(runtime)
         return runtime
 
@@ -392,12 +392,9 @@ class GnuBootstrapTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE"),
                          "Real GNU source and runtime inputs are required")
     def test_loader_stub_source_recipe_replays(self):
-        from test_source_origins import headers, origins
+        from test_source_origins import headers
 
-        spec = importlib.util.spec_from_file_location("gnu_runtime", ROOT / "images/debian-slim/runtime.py")
-        runtime = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"headers": headers, "origins": origins}):
-            spec.loader.exec_module(runtime)
+        runtime = self.constant_runtime()
         evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
         report = json.loads((evidence / "gnu-libc-trace.json").read_text())
         name = "/build/glibc-runtime/elf/librtld.mapT.o.stdin.s"

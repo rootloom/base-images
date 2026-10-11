@@ -156,6 +156,26 @@ No fourth Team task was created. A fresh coordinator occurrence must obtain inde
 Do not reset task records, change factory configuration, or duplicate builds to bypass this limit.
 The duty coordinator mismatch, duty expiry, and signed-index expiry remain unchanged.
 
+### Scoped Native Preflight Repair
+
+GNU run `38152947835` failed before compilation on both native architectures at commit `65b4268`.
+The scoped GNU suite could not import `compiler` while loading `runtime.py`.
+The full suite had hidden this test-loader defect through another test module's import path.
+No native build artifacts were produced by that run.
+The shared test loader now binds the existing compiler module explicitly.
+The loader-stub replay test reuses that same loader rather than duplicating its imports.
+No recipe, source lock, or provenance admission changed.
+
+The isolated GNU suite now passes: 19 discovered, 6 passed, 13 skipped without native inputs.
+With retained pinned source inputs, it passes 10 tests and skips 9 native-evidence checks.
+The full local suite still passes 181 tests with 22 skipped.
+The upstream constant-script fixture passed once; historical loader-stub replay passed on each retained architecture.
+These tests repair preflight but do not qualify current native closure or any release.
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 GNU_BOOTSTRAP_INPUTS=evidence/gnu-hosted-inputs python3 -m unittest discover -s tests -p test_gnu_bootstrap.py -q
+```
+
 ## Conversion Ledger
 
 Implemented first slices now exist for Debian, Ubuntu, and Alpine.
