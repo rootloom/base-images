@@ -79,6 +79,24 @@ class DebianSourceSlice(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "checksum"):
                     slice_module.fetch(directory, lock)
 
+    def test_local_key_snapshot_does_not_contact_keyserver(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            lock_path = self.fixture(directory)
+            (directory / "key.asc").write_bytes(b"public-key-fixture")
+            lock = json.loads(lock_path.read_text())
+            lock["verification_inputs"] = [{"filename": "key.asc", "local_file": "key.asc", "size": 18,
+                "sha256": hashlib.sha256(b"public-key-fixture").hexdigest()}]
+            lock_path.write_text(json.dumps(lock))
+            inputs = directory / "inputs"
+            inputs.mkdir()
+            for name in ("source.dsc", "source.tar.xz"):
+                (inputs / name).write_bytes((directory / name).read_bytes())
+            with patch.object(slice_module, "urlopen") as request:
+                slice_module.fetch(inputs, lock_path)
+                request.assert_not_called()
+            self.assertEqual((inputs / "key.asc").read_bytes(), b"public-key-fixture")
+
     def test_archive_traversal_blocks_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -136,6 +154,10 @@ class DebianSourceSlice(unittest.TestCase):
         self.assertEqual(ubuntu["version"], "13ubuntu10.5")
         self.assertNotEqual(ubuntu["sources"][1]["sha256"], debian["sources"][1]["sha256"])
         self.assertFalse(ubuntu["release_qualified"])
+        key = ubuntu["verification_inputs"][0]
+        retained = ROOT / "images/ubuntu" / key["local_file"]
+        self.assertEqual(retained.stat().st_size, key["size"])
+        self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(), key["sha256"])
 
 
 if __name__ == "__main__":

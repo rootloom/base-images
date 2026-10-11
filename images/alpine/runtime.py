@@ -42,6 +42,8 @@ def prepare_recipe(recipe, inputs):
         if not line.startswith("CONFIG_") or "=" not in line:
             continue
         key = line.split("=", 1)[0][7:]
+        if key in {"FEATURE_SH_MATH", "FEATURE_SH_MATH_64"}:
+            continue
         if key in APPLET_CONFIG or key.startswith(("ASH_", "FEATURE_SH_")):
             selected.append(line)
     if not {"CONFIG_ASH=y", "CONFIG_SH_IS_ASH=y", "CONFIG_PIE=y"}.issubset(selected):
@@ -50,7 +52,7 @@ def prepare_recipe(recipe, inputs):
     (recipe / "alpine-original-busybox.config").write_text("\n".join(original) + "\n")
     (recipe / "alpine-config-delta.json").write_text(json.dumps({"retained": selected,
         "omitted": [line for line in original if line.startswith("CONFIG_") and line not in selected],
-        "scope": "Minimal container subset. No APK, init services, TLS client, utmps, or privilege-changing applets."}, indent=2) + "\n")
+        "scope": "Minimal container subset. No shell arithmetic, APK, init services, TLS client, utmps, or privilege-changing applets."}, indent=2) + "\n")
     (recipe / "sources.lock.json").write_text(json.dumps(lock, sort_keys=True, indent=2) + "\n")
 
 

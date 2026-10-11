@@ -26,15 +26,16 @@
   "verification_inputs": [
     {
       "filename": "ubuntu-base-files-key.asc",
+      "local_file": "ubuntu-base-files-key.asc",
       "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x25E3FF2D7F469DBE7D0D4E50AFCFEC8E669CE1C2",
-      "size": 124448,
-      "sha256": "c8df300f4fe622d5d7c1dbedacfbad67578c825e8fe8050d36a406e2488119da",
+      "size": 5527,
+      "sha256": "1b1af1e07b441e7e3401ce6789c04fa8bdb214b4355d82a885442a3589658a6d",
       "fingerprint": "25E3FF2D7F469DBE7D0D4E50AFCFEC8E669CE1C2"
     }
   ],
   "authentication": {
     "status": "descriptor-signature-verified",
-    "evidence": "GPG verifies the HTTPS descriptor with the pinned key from Ubuntu's keyserver. The signed descriptor binds the archive SHA-256. Key owner identity and signed distribution index membership are not independently verified.",
+    "evidence": "GPG verifies the HTTPS descriptor with the retained minimal public-key export from Ubuntu's keyserver snapshot. Its fingerprint and checksum remain pinned. The signed descriptor binds the archive SHA-256. Key owner identity, live revocation status, and signed distribution index membership are not independently verified.",
     "claimed_descriptor_signer": "25E3FF2D7F469DBE7D0D4E50AFCFEC8E669CE1C2"
   },
   "recipe": {

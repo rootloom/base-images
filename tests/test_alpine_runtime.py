@@ -59,6 +59,7 @@ class AlpineRuntimeInputs(unittest.TestCase):
             self.assertIn("CONFIG_PIE=y", config)
             self.assertNotIn("CONFIG_FEATURE_UTMP=y", config)
             self.assertNotIn("CONFIG_WGET=y", config)
+            self.assertNotIn("CONFIG_FEATURE_SH_MATH=y", config)
             self.assertEqual((recipe / "alpine-original-busybox.config").read_bytes(), (inputs / "main/busybox/busyboxconfig").read_bytes())
 
 

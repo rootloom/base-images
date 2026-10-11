@@ -26,6 +26,14 @@ def fetch(inputs, lock_path):
             raise ValueError("Source input must not be a symlink: " + name)
         if target.exists():
             data = target.read_bytes()
+        elif item.get("local_file"):
+            local = item["local_file"]
+            if PurePosixPath(local).name != local or local in ("", ".", ".."):
+                raise ValueError("Invalid local verification filename")
+            key = lock_path.parent / local
+            if key.is_symlink():
+                raise ValueError("Verification input must not be a symlink")
+            data = key.read_bytes()
         else:
             if not item["url"].startswith("https://"):
                 raise ValueError("Source URL must use HTTPS")
