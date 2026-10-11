@@ -27,7 +27,7 @@ def main():
                    "CC": "/gnu-bootstrap/bin/gcc --sysroot=/build/source-sysroot", "CFLAGS": "-O2"}
     commands = [["/build/glibc/glibc-2.41/configure", "--prefix=/usr", "--disable-werror",
                  "--without-selinux", "--with-headers=/build/linux/linux-6.12.107/usr/include"],
-                ["make", "-j1", "CC=python3 /recipe/trace_compiler.py --sysroot=/build/source-sysroot"]]
+                ["make", "-j1", "lib", "CC=python3 /recipe/trace_compiler.py --sysroot=/build/source-sysroot"]]
     with (evidence / "gnu-libc-trace.build.log").open("wb") as log:
         for command in commands:
             result = subprocess.run(command, cwd=work, env=environment, stdout=log,
