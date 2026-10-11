@@ -39,10 +39,11 @@ def main():
     commands += [[str(source / "src/configure"), "--prefix=/gnu-bootstrap", "--disable-bootstrap",
                   "--enable-languages=c", "--disable-multilib", "--disable-libsanitizer",
                   "--disable-libgomp", "--disable-libquadmath", "--disable-libatomic",
-                  "--enable-default-pie", "--enable-default-ssp", "--disable-nls"],
-                 # Retain Debian patches, but omit their optional /usr/bin/time wrapper.
-                 ["make", "-j2", "LLINKER=$(LINKER)", "all-gcc", "all-target-libgcc"],
-                 ["make", "LLINKER=$(LINKER)", "install-gcc", "install-target-libgcc"]]
+                  "--enable-default-pie", "--enable-default-ssp", "--disable-nls",
+                  # Debian's non-mutex linker branch requires /usr/bin/time.
+                  "--enable-link-mutex"],
+                 ["make", "-j2", "all-gcc", "all-target-libgcc"],
+                 ["make", "install-gcc", "install-target-libgcc"]]
     record = {"name": "gcc", "version": "14.2.0-19", "materials": dict(MATERIALS),
               "signing_fingerprint": SIGNER, "primary_fingerprint": primary,
               "scope": "temporary-bootstrap", "release_qualified": False,

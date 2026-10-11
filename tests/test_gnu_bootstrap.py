@@ -124,6 +124,7 @@ class GnuBootstrapTests(unittest.TestCase):
         self.assertIs(record["completed"], True)
         self.assertEqual(record["materials"], dict(GCC.MATERIALS))
         self.assertEqual(record["signing_fingerprint"], GCC.SIGNER)
+        self.assertIn("--enable-link-mutex", record["commands"][2])
         self.assertTrue(record["patches"])
         self.assertRegex(record["distro_defaults_sha256"], r"^[a-f0-9]{64}$")
         self.assertGreater((evidence / "gcc-bootstrap.build.log").stat().st_size, 0)
