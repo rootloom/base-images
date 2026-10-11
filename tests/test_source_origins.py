@@ -15,6 +15,10 @@ spec = importlib.util.spec_from_file_location("source_origins", RECIPE / "origin
 origins = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, {"compiler": compiler}):
     spec.loader.exec_module(origins)
+header_spec = importlib.util.spec_from_file_location("gnu_headers", RECIPE.parent / "debian-slim/headers.py")
+headers = importlib.util.module_from_spec(header_spec)
+with patch.dict(sys.modules, {"origins": origins}):
+    header_spec.loader.exec_module(headers)
 
 
 class SourceOrigins(unittest.TestCase):
@@ -86,6 +90,29 @@ class SourceOrigins(unittest.TestCase):
     def test_snapshot_rejects_missing_source_tree(self):
         with self.assertRaisesRegex(ValueError, "Missing locked source tree"):
             origins.snapshot_sources({self.root / "missing": "gcc"}, self.root / "source-files.json")
+
+    def test_installed_gnu_header_requires_unchanged_source(self):
+        source = self.root / "source.h"
+        source.write_bytes(b"verified GNU source")
+        installed = self.root / "include"
+        installed.mkdir()
+        (installed / "copied.h").write_bytes(source.read_bytes())
+        (installed / "unknown.h").write_bytes(b"bootstrap header")
+        index = {str(source): {"component": "gcc", "sha256": origins.sha256(source)}}
+        records = headers.audit_headers([installed], index)
+        self.assertEqual([item["verified"] for item in records], [True, False])
+        self.assertEqual(records[0]["sources"], [{"path": str(source), "component": "gcc"}])
+        source.write_bytes(b"changed after source snapshot")
+        self.assertFalse(any(item["verified"] for item in headers.audit_headers([installed], index)))
+
+    def test_installed_gnu_header_escape_rejected(self):
+        installed = self.root / "include"
+        installed.mkdir()
+        source = self.root / "source.h"
+        source.write_bytes(b"verified source")
+        (installed / "escaped.h").symlink_to(source)
+        with self.assertRaisesRegex(ValueError, "Installed header symlink escapes"):
+            headers.audit_headers([installed], {})
 
     def test_unindexed_source_tree_header_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):

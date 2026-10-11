@@ -136,6 +136,28 @@ class GnuBootstrapTests(unittest.TestCase):
                          record["distro_defaults_sha256"])
         self.assertGreater((evidence / "gcc-bootstrap.build.log").stat().st_size, 0)
 
+    @unittest.skipUnless(os.environ.get("GNU_HEADER_EVIDENCE"), "Native GNU header evidence is required")
+    def test_native_header_audit_stays_unqualified(self):
+        evidence = Path(os.environ["GNU_HEADER_EVIDENCE"])
+        record = json.loads((evidence / "gnu-headers.json").read_text())
+        self.assertIs(record["release_qualified"], False)
+        self.assertEqual(record["scope"], "source-header-audit")
+        self.assertIs(record["completed"], True)
+        self.assertTrue(record["headers"])
+        self.assertEqual(record["headers_verified"], all(item["verified"] for item in record["headers"]))
+        source_files = {}
+        for name in ("gcc", "glibc", "linux"):
+            source_files.update(json.loads((evidence / (name + ".source-files.json")).read_text()))
+        for header in record["headers"]:
+            with self.subTest(header=header["path"]):
+                self.assertRegex(header["sha256"], r"^[a-f0-9]{64}$")
+                retained = evidence / "header-inputs" / header["sha256"]
+                self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(), header["sha256"])
+                self.assertEqual(header["verified"], bool(header["sources"]))
+                for source in header["sources"]:
+                    self.assertEqual(source_files[source["path"]]["sha256"], header["sha256"])
+                    self.assertEqual(source_files[source["path"]]["component"], source["component"])
+
     @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_EVIDENCE"), "Native GNU build evidence is required")
     def test_native_build_stays_unqualified(self):
         evidence = Path(os.environ["GNU_BOOTSTRAP_EVIDENCE"])

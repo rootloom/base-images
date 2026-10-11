@@ -19,6 +19,13 @@ COPY --from=inputs gmp-6.2.1.tar.bz2 mpfr-4.1.0.tar.bz2 mpc-1.2.1.tar.gz /inputs
 RUN --network=none ln -s /bootstrap/bin/autom4te2.69 /usr/bin/autom4te2.69
 RUN --network=none python3 /recipe/gcc_bootstrap.py
 
+FROM gnu-compiler AS gnu-headers
+COPY images/debian-slim/headers.py /recipe/headers.py
+RUN --network=none python3 /recipe/headers.py
+
+FROM scratch AS header-evidence
+COPY --from=gnu-headers /evidence/ /
+
 FROM scratch AS compiler-evidence
 COPY --from=gnu-compiler /evidence/ /
 
