@@ -10,6 +10,18 @@ from headers import make_header
 from origins import input_origin, sha256
 
 
+def loader_input(libc, source_files, retained):
+    makefile = libc / "elf/Makefile"
+    text = makefile.read_text()
+    symbols = re.search(r"^rtld-stubbed-symbols = .*?(?=^\$\(objpfx\)librtld.map:)",
+                        text, re.M | re.S).group()
+    loop = re.search(r"^\tfor symbol in \$\(rtld-stubbed-symbols\);.*?^\tdone \| \$\(CC\)",
+                     text, re.M | re.S).group().removesuffix(" | $(CC)")
+    target = "elf/librtld.mapT.o.stdin.s"
+    body = "have-ssp := yes\n" + symbols + target + ":\n\tmkdir -p elf\n" + loop + " > $@\n"
+    return make_header("glibc", [makefile], body, target, source_files, retained)
+
+
 def generated_inputs(libc, source_files, retained, machine, awk="/bootstrap/bin/gawk"):
     makefile = libc / "math/Makefile"
     text = makefile.read_text()
@@ -60,6 +72,24 @@ def generated_inputs(libc, source_files, retained, machine, awk="/bootstrap/bin/
         variables + "AWK := " + awk + "\nsubdirs := sysdeps/nptl\nsysdirs := " +
         " ".join(str(libc / name) for name in sysdirs) + "\n" + rule + "\n",
         "dl-tunable-list.h", source_files, retained)
+    makefile = libc / "posix/Makefile"
+    rule = re.search(r"^\$\(objpfx\)posix-conf-vars-def.h:.*?(?=^\n)",
+                     makefile.read_text(), re.M | re.S).group()
+    generated["posix/posix-conf-vars-def.h"] = make_header(
+        "glibc", [makefile, libc / "scripts/gen-posix-conf-vars.awk", libc / "posix/posix-conf-vars.list"],
+        variables + "objpfx := posix/\nmake-target-directory = mkdir -p posix\nAWK := " + awk +
+        "\nVPATH := " + str(libc / "posix") + "\n" + rule + "\n",
+        "posix/posix-conf-vars-def.h", source_files, retained)
+    makerules, makeconfig = libc / "Makerules", libc / "Makeconfig"
+    abi = libc / "sysdeps/unix/sysv/linux" / ("x86" if machine == "x86_64" else "aarch64") / "Makefile"
+    wrapper = re.search(r"^\$\(common-objpfx\)gnu/lib-names.h:\n.*?(?=^endif$)",
+                        makerules.read_text(), re.M | re.S).group()
+    defaults = re.search(r"^ifndef abi-includes\n.*?^endif$", makeconfig.read_text(), re.M | re.S).group()
+    generated["gnu/lib-names.h"] = make_header(
+        "glibc", [makerules, makeconfig, abi], defaults + "\ninclude " + str(abi) +
+        "\ncommon-objpfx :=\n" + wrapper, "gnu/lib-names.h", source_files, retained,
+        ["default-abi=" + ("64" if machine == "x86_64" else "lp64")])
+    generated["elf/librtld.mapT.o.stdin.s"] = loader_input(libc, source_files, retained)
     return generated
 
 

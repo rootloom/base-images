@@ -34,6 +34,8 @@ class GnuBootstrapTests(unittest.TestCase):
         sysdirs = ["sysdeps/x86_64/64", "sysdeps/x86"] if machine == "x86_64" else ["sysdeps/aarch64"]
         names = ["math/Makefile", "locale/Makefile", "locale/gen-translit.py", "locale/C-translit.h.in",
                  "csu/Makefile", "abi-tags", "Makerules", "libc-abis", "scripts/gen-libc-abis",
+                 "elf/Makefile", "posix/Makefile", "posix/posix-conf-vars.list", "scripts/gen-posix-conf-vars.awk",
+                 "sysdeps/unix/sysv/linux/" + ("x86" if machine == "x86_64" else "aarch64") + "/Makefile",
                  "scripts/move-if-change", "Makeconfig", "scripts/gen-tunables.awk", *[
                      name + "/dl-tunables.list" for name in ["elf", "sysdeps/nptl", *sysdirs]]]
         index = {}
@@ -69,6 +71,34 @@ class GnuBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.assertTrue(self.runtime_sources(Path(directory).resolve(), evidence, machine))
 
+    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE"),
+                         "Real GNU source and runtime inputs are required")
+    def test_loader_stub_source_recipe_replays(self):
+        from test_source_origins import headers, origins
+
+        spec = importlib.util.spec_from_file_location("gnu_runtime", ROOT / "images/debian-slim/runtime.py")
+        runtime = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {"headers": headers, "origins": origins}):
+            spec.loader.exec_module(runtime)
+        evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
+        report = json.loads((evidence / "gnu-libc-trace.json").read_text())
+        name = "/build/glibc-runtime/elf/librtld.mapT.o.stdin.s"
+        expected = report["unknown_inputs"].get(name) or report["verified_inputs"][name]["sha256"]
+        constructor = tempfile.TemporaryDirectory
+        with constructor() as directory:
+            root = Path(directory).resolve()
+            retained = root / "retained"
+            retained.mkdir()
+            index = self.runtime_sources(root, evidence, report["machine"])
+            with patch.object(headers.tempfile, "TemporaryDirectory", side_effect=lambda **kw: constructor(dir=root)):
+                producer = runtime.loader_input(root, index, retained)
+                self.assertEqual(producer["sha256"], expected)
+                self.assertEqual(headers.sha256(retained / producer["recipe_sha256"]), producer["recipe_sha256"])
+                makefile = root / "elf/Makefile"
+                makefile.write_text(makefile.read_text().replace("  calloc ", "  unverified_symbol "))
+                with self.assertRaises(ValueError):
+                    runtime.loader_input(root, index, retained)
+
     @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE")
                          and shutil.which("gawk"), "Real GNU source, runtime inputs, and GNU awk are required")
     def test_runtime_recipes_reproduce_consumed_inputs(self):
@@ -102,7 +132,7 @@ class GnuBootstrapTests(unittest.TestCase):
                 self.assertEqual(headers.sha256(retained / producer["recipe_sha256"]), producer["recipe_sha256"])
                 for source in producer["inputs"]:
                     self.assertEqual(headers.sha256(retained / source["sha256"]), source["sha256"])
-            self.assertGreaterEqual(matched, 7)
+            self.assertGreaterEqual(matched, 10)
             (root / "math/Makefile").write_text("gen-calls = unverifiedF\n")
             with self.assertRaises(ValueError):
                 origins.input_origin(root / "math/Makefile", index)
@@ -125,7 +155,7 @@ class GnuBootstrapTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((evidence / "sources/link-maps" / name).read_bytes()).hexdigest(), digest)
         for digest in record["unknown_inputs"].values():
             self.assertEqual(hashlib.sha256((evidence / "sources/trace-inputs" / digest).read_bytes()).hexdigest(), digest)
-        self.assertGreaterEqual(len(record["verified_inputs"]), 7)
+        self.assertGreaterEqual(len(record["verified_inputs"]), 10)
         source_files = json.loads((evidence / "glibc.source-files.json").read_text())
         for name, producer in record["verified_inputs"].items():
             self.assertNotIn(name, record["unknown_inputs"])
