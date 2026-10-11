@@ -41,6 +41,16 @@ GNU construction now retains temporary compiler generation inputs and can replay
 Fresh libgcc construction records byte-bound `libgcc_tm.h` and `auto-target.h` replay evidence, but does not admit those headers.
 Configure probe inputs, compiler generated headers, bootstrap runtime replacement, and explicit GNU final-link policy remain unresolved.
 These construction controls do not complete the Debian runtime graph or qualify any release.
+Exact-commit GNU run `38165498820` retains a `libc-modules.h` source-rule proof on both native architectures.
+The proof remains outside `verified_inputs` with `admitted=false`; its `soversions.i` producer remains blocked.
+Both receipts still have unknown generated dependencies and no `gnu-libgcc.json`.
+Successful source-rule replay is not complete generated-header provenance.
+GNU runtime construction now retains the actual configure invocation before `make`.
+The trace checksum links `glibc-configure-capture.json` to SHA-256-addressed retained source, cache, site, and output bytes.
+The receipt records selected sysdeps candidates and explicitly missing outputs, including unavailable `confdefs.h`.
+The environment allowlist and raw `config.log` do not prove complete environment or probe input/tool provenance.
+Sysdeps selection, probe provenance, and output replay remain unproved; capture cannot admit `config.h`.
+New capture bytes need native AMD64 and ARM64 verification from the next push-triggered GNU run.
 Source promotion rejects all candidates until authenticated independent exact-digest quality approval is implemented.
 The current task IDs, scoped tests, native follow-up, and finite duty expiry are recorded in the workstream ledger.
 

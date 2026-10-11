@@ -17,6 +17,9 @@ sys.path.insert(0, str(ROOT / "images/debian-slim"))
 SPEC = importlib.util.spec_from_file_location("glibc_config", ROOT / "images/debian-slim/glibc_config.py")
 CONFIG = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CONFIG)
+RUNTIME_SPEC = importlib.util.spec_from_file_location("config_capture_runtime", ROOT / "images/debian-slim/runtime.py")
+RUNTIME = importlib.util.module_from_spec(RUNTIME_SPEC)
+RUNTIME_SPEC.loader.exec_module(RUNTIME)
 
 
 class ConfigTests(unittest.TestCase):
@@ -54,6 +57,102 @@ class ConfigTests(unittest.TestCase):
 
     def inspect(self):
         return CONFIG.inspect_retained_config(self.root, self.root)
+
+    def capture(self):
+        retained = self.root / "sources/configure"
+        retained.mkdir()
+        references = []
+        for source in self.sources:
+            data = source["path"].encode()
+            digest = hashlib.sha256(data).hexdigest()
+            source["sha256"] = digest
+            (retained / digest).write_bytes(data)
+            references.append({**source, "role": "source"})
+        (retained / self.digest).write_bytes(self.data)
+        references.append({"path": CONFIG.CONFIG, "role": "output", "sha256": self.digest})
+        self.capture_receipt = {"schema_version": 1, "scope": "glibc-configure-capture",
+                                "admitted": False, "release_qualified": False,
+                                "environment_complete": False, "sysdeps_selection_verified": False,
+                                "probe_provenance_verified": False, "output_replayed": False,
+                                "command": self.trace["commands"][0], "cwd": str(Path(CONFIG.CONFIG).parent),
+                                "files": references,
+                                "missing_outputs": ["config.status", "config.log", "confdefs.h", "config.make", "config.cache"]}
+        self.save_capture()
+        return retained
+
+    def save_capture(self):
+        data = json.dumps(self.capture_receipt).encode()
+        (self.root / "glibc-configure-capture.json").write_bytes(data)
+        self.trace["configure_capture_sha256"] = hashlib.sha256(data).hexdigest()
+        self.save()
+
+    def test_capture_does_not_admit_config(self):
+        self.capture()
+        report = self.inspect()
+        self.assertFalse(report["admitted"])
+        self.assertIn("confdefs.h", report["capture"]["missing_outputs"])
+        with self.assertRaisesRegex(ValueError, "Unproved glibc"):
+            CONFIG.require_config_producer(self.root, self.root)
+
+    def test_capture_missing_file_rejected(self):
+        retained = self.capture()
+        (retained / self.digest).unlink()
+        with self.assertRaisesRegex(ValueError, "Unlisted or missing"):
+            self.inspect()
+
+    def test_capture_unlisted_file_rejected(self):
+        retained = self.capture()
+        (retained / ("b" * 64)).write_bytes(b"unlisted")
+        with self.assertRaisesRegex(ValueError, "Unlisted or missing"):
+            self.inspect()
+
+    def test_capture_tamper_rejected(self):
+        retained = self.capture()
+        (retained / self.digest).write_bytes(b"changed")
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            self.inspect()
+
+    def test_capture_source_binding_rejected(self):
+        self.capture()
+        self.capture_receipt["files"][0]["component"] = "gcc"
+        self.save_capture()
+        with self.assertRaisesRegex(ValueError, "source binding mismatch"):
+            self.inspect()
+
+    def test_capture_admission_flags_rejected(self):
+        self.capture()
+        for key in ("admitted", "release_qualified", "probe_provenance_verified", "output_replayed"):
+            with self.subTest(key=key):
+                self.capture_receipt[key] = True
+                self.save_capture()
+                with self.assertRaisesRegex(ValueError, "capture admission"):
+                    self.inspect()
+                self.capture_receipt[key] = False
+
+    def test_capture_invocation_mismatch_rejected(self):
+        self.capture()
+        self.capture_receipt["cwd"] = "/wrong"
+        self.save_capture()
+        with self.assertRaisesRegex(ValueError, "invocation mismatch"):
+            self.inspect()
+
+    def test_capture_omitted_output_not_reported_rejected(self):
+        self.capture()
+        self.capture_receipt["missing_outputs"] = []
+        self.save_capture()
+        with self.assertRaisesRegex(ValueError, "missing output list mismatch"):
+            self.inspect()
+
+    def test_capture_output_link_mismatch_rejected(self):
+        retained = self.capture()
+        data = b"different config"
+        digest = hashlib.sha256(data).hexdigest()
+        (retained / self.digest).unlink()
+        (retained / digest).write_bytes(data)
+        self.capture_receipt["files"][-1]["sha256"] = digest
+        self.save_capture()
+        with self.assertRaisesRegex(ValueError, "capture output mismatch"):
+            self.inspect()
 
     def test_valid_links_remain_blocked(self):
         report = self.inspect()
@@ -189,6 +288,52 @@ class ConfigTests(unittest.TestCase):
         (self.root / materials[0][0]).write_bytes(b"not the pinned source descriptor")
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):
             CONFIG.verify_config_sources(self.root, self.root)
+
+
+class CaptureExecutionTests(unittest.TestCase):
+    def test_actual_invocation_retains_outputs_before_make(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, work, evidence = (root / name for name in ("source", "work", "evidence"))
+            source.mkdir()
+            work.mkdir()
+            evidence.mkdir()
+            names = ("configure", "config.h.in", "sysdeps/generic/configure")
+            sources = {}
+            for name in names:
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(name)
+                sources[str(path)] = {"component": "glibc", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            (work / "config.cache").write_text("pre-cache")
+            environment = {"PATH": "/tools", "CC": "gcc", "ac_cv_test": "yes", "SECRET_TOKEN": "not retained"}
+            command = [str(source / "configure"), "--prefix=/usr"]
+
+            def run(argv, **kwargs):
+                self.assertEqual(argv, command)
+                self.assertEqual(kwargs["env"], environment)
+                self.assertEqual(kwargs["cwd"], work)
+                for name in ("config.h", "config.status", "config.log"):
+                    (work / name).write_text("probe command/result/tool evidence " + name)
+                (work / "config.make").write_text("config-sysdirs = sysdeps/generic\n")
+                (work / "config.cache").write_text("post-cache")
+                return subprocess_result
+
+            subprocess_result = type("Result", (), {"returncode": 0})()
+            with patch.object(RUNTIME.subprocess, "run", side_effect=run):
+                RUNTIME.capture_configure(command, work, environment, sources, evidence, None)
+            receipt = json.loads((evidence / "glibc-configure-capture.json").read_text())
+            self.assertNotIn("SECRET_TOKEN", receipt["environment"])
+            self.assertEqual(receipt["environment"]["ac_cv_test"], "yes")
+            self.assertIn("confdefs.h", receipt["missing_outputs"])
+            self.assertEqual(receipt["selected_sysdeps"], ["sysdeps/generic"])
+            self.assertFalse(receipt["probe_provenance_verified"])
+            self.assertFalse(receipt["admitted"])
+            for item in receipt["files"]:
+                CONFIG.checked(evidence / "sources/configure", item["sha256"], item["sha256"])
+            cache = [item for item in receipt["files"] if item["path"] == str(work / "config.cache")]
+            self.assertEqual({item["role"] for item in cache}, {"pre-cache", "output"})
+            self.assertNotEqual(cache[0]["sha256"], cache[1]["sha256"])
 
 
 class NativeConfigTests(unittest.TestCase):

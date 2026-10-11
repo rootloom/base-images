@@ -364,6 +364,77 @@ def generated_inputs(libc, source_files, retained, machine, awk="/bootstrap/bin/
     return generated
 
 
+def capture_configure(command, work, environment, source_files, evidence, log):
+    """Retain actual configure execution, not probe or runtime admission."""
+    retained = evidence / "sources/configure"
+    retained.mkdir(parents=True)
+    references = []
+
+    def retain(path, role):
+        if not path.is_file():
+            return False
+        if path.is_symlink():
+            raise ValueError("Unsafe configure input: " + str(path))
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        item = {"path": str(path), "sha256": digest, "role": role}
+        if role == "source":
+            if source_files.get(str(path)) != {"component": "glibc", "sha256": digest}:
+                raise ValueError("Unverified configure source: " + str(path))
+            item["component"] = "glibc"
+        (retained / digest).write_bytes(data)
+        references.append(item)
+        return True
+
+    source = Path(command[0]).parent
+    for name in ("configure", "config.h.in"):
+        if not retain(source / name, "source"):
+            raise ValueError("Missing configure source: " + name)
+    relevant = {"PATH", "CC", "CXX", "CPP", "CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS",
+                "LIBS", "AR", "AS", "LD", "NM", "RANLIB", "MAKE", "AWK", "SHELL",
+                "CONFIG_SHELL", "CONFIG_SITE", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+                "ASFLAGS", "BUILD_CC", "BISON", "PYTHON", "PERL", "BASH", "AUTOCONF"}
+    saved_environment = {key: value for key, value in environment.items()
+                         if key in relevant or key.startswith(("ac_cv_", "libc_cv_"))}
+    # This invocation has no cache option. Default site discovery is not proved here.
+    retain(work / "config.cache", "pre-cache")
+    if environment.get("CONFIG_SITE"):
+        for name in environment["CONFIG_SITE"].split():
+            path = Path(name)
+            retain(path if path.is_absolute() else work / path, "site")
+    result = subprocess.run(command, cwd=work, env=environment, stdout=log,
+                            stderr=subprocess.STDOUT)
+    missing = []
+    for name in ("config.h", "config.status", "config.log", "confdefs.h", "config.make", "config.cache"):
+        if not retain(work / name, "output"):
+            missing.append(name)
+    selected = []
+    if (work / "config.make").is_file():
+        text = (work / "config.make").read_text()
+        match = re.search(r"^config-sysdirs\s*=\s*(.*)$", text, re.M)
+        if match:
+            selected = match[1].split()
+            for name in selected:
+                if not name.startswith("sysdeps/") or ".." in Path(name).parts:
+                    raise ValueError("Unsafe configure sysdeps selection")
+                for suffix in ("configure", "configure.ac", "Implies", "Implies-before", "Implies-after"):
+                    retain(source / name / suffix, "source")
+    receipt = {"schema_version": 1, "scope": "glibc-configure-capture",
+               "admitted": False, "release_qualified": False, "command": command,
+               "cwd": str(work), "environment": saved_environment,
+               "environment_complete": False, "cache_default": "/dev/null",
+               "returncode": result.returncode, "files": references,
+               "missing_outputs": missing, "selected_sysdeps": selected,
+               "sysdeps_selection_verified": False, "probe_evidence": "config.log",
+               "probe_evidence_complete": False,
+               "probe_provenance_verified": False, "output_replayed": False,
+               "blockers": ["Environment and cache/site discovery closure unproved",
+                            "Probe tools and consumed inputs unproved",
+                            "Sysdeps selection and config.h output replay unproved"]}
+    (evidence / "glibc-configure-capture.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    return result
+
+
 def main():
     evidence = Path("/evidence")
     headers = json.loads((evidence / "gnu-headers.json").read_text())
@@ -385,9 +456,10 @@ def main():
                  "--without-selinux", "--with-headers=/build/linux/linux-6.12.107/usr/include"],
                 ["make", "-j1", "lib", "CC=python3 /recipe/trace_compiler.py --sysroot=/build/source-sysroot"]]
     with (evidence / "gnu-libc-trace.build.log").open("wb") as log:
-        for command in commands:
-            result = subprocess.run(command, cwd=work, env=environment, stdout=log,
-                                    stderr=subprocess.STDOUT)
+        for index, command in enumerate(commands):
+            result = (capture_configure(command, work, environment, source_files, evidence, log)
+                      if index == 0 else subprocess.run(command, cwd=work, env=environment, stdout=log,
+                                                       stderr=subprocess.STDOUT))
             if result.returncode:
                 log.flush()
                 print((evidence / "gnu-libc-trace.build.log").read_text(errors="replace")[-12000:], flush=True)
@@ -437,6 +509,7 @@ def main():
                "machine": os.uname().machine,
                "commands": commands, "compiler_records": len(records), "link_maps": link_maps,
                "generation_records": generation_records,
+               "configure_capture_sha256": sha256(evidence / "glibc-configure-capture.json"),
                "source_rule_proofs": {str(work / "libc-modules.h"): modules},
                "unknown_inputs": unknown, "verified_inputs": verified_inputs, "libc_sha256": sha256(libc),
                "header_audit_sha256": sha256(evidence / "gnu-headers.json")}

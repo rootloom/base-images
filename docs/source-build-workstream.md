@@ -273,6 +273,78 @@ All six genuine source-built public releases remain unfinished. Production promo
 The active duty still requires rootboss while the factory coordinator is architect; its mismatch remains confirmed.
 Duty expiry `2026-10-17T15:55:05Z` and signed-index expiry `2026-10-17T19:19:25Z` remain unchanged.
 
+### Repaired Duty Continuation
+
+The user authorized the coordinator-duty repair and factory restart on 2026-10-11.
+Admission repair task `job_12cc587e6001kgoFlka944rD37` changed no image source or build ownership.
+The live duty now verifies architect `tm_12623dba0001T08cTwACfxo83V` and nudges architect during active work.
+Its cadence remains 900 seconds. Its expiry remains `2026-10-17T15:55:05Z`.
+Renewal is required before that expiry; this is not indefinite scheduling.
+Earlier mismatch statements above describe historical checkpoints, not the repaired duty.
+
+Factory revision 8 admitted run `tfr_tool_73ea218228aea036860864b20e7dd8685311079711d5d1a7280ff377df61ec5b`.
+Architect independently verified stopped predecessor writers and the rootboss pause handoff.
+Only the three current assignments owned delivery work:
+
+| Task | Exact Path Ownership |
+| --- | --- |
+| `job_12cc7463e001aFXxWMZIiLxVW9` | Coordinator ledger, source graph documentation, and necessary build wiring |
+| `job_12cc7463e002TnDePXRLpCiPL9` | `images/debian-slim/runtime.py`, `images/debian-slim/glibc_config.py`, `tests/test_glibc_config.py` |
+| `job_12cc7463e0030LDBTHgrDos80m` | Independent read-only qualification and safely retained evidence |
+
+Initial checkout was clean at `7dea9e1bb51ca471f22c624c6edc5689b993fce3`.
+Live remote main had advanced to `443fb01a5eb79253c1009ac15557b541bd2bc12c`.
+That commit changes only `latest.md` and `status.json`; architect preserved it by fast-forward before write clearance.
+
+Existing push-triggered runs completed at exact `7dea9e1`; no duplicate dispatch was needed:
+
+| Run | Observed State | Boundary |
+| --- | --- | --- |
+| [GNU 38165498820](https://github.com/rootloom/base-images/actions/runs/38165498820) | Failed both native acceptance jobs | Compile and configure-blocker checks passed; runtime provenance remains rejected |
+| [Source 38165498801](https://github.com/rootloom/base-images/actions/runs/38165498801) | Failed both native scan jobs and publication gate | Blocked evidence published; no promotion |
+| [Alpine 38165498821](https://github.com/rootloom/base-images/actions/runs/38165498821) | Succeeded | Construction success does not close source/security/public release gates |
+
+GNU artifact metadata identifies AMD64 artifact `11713375056`, 246197938 bytes,
+with SHA-256 `bb797833ad4fd99325774bf8434c9238d128e1cb0bbdae808b3288d2fb66b321`.
+ARM64 artifact `11712164883` has 228828982 bytes,
+with SHA-256 `3f150b7f06d997ae9c1b110e09038bc2422b74458c16addea64a17dbd085dc3e`.
+These are archive identities, not qualified image digests.
+All six genuine source-built public releases remain unfinished.
+
+The stopped implementation adds `capture_configure()` around the actual configure call, before `make`.
+`gnu-libc-trace.json` binds `glibc-configure-capture.json` through `configure_capture_sha256`.
+Retained bytes use `sources/configure/<sha256>` and include verified configure/template sources,
+pre-cache/site inputs, available post-configure outputs, and selected sysdeps source candidates.
+The receipt records argv, cwd, an environment allowlist, cache variables, return code, and missing outputs.
+The checker rejects missing, changed, unlisted, or incorrectly bound retained inputs and admission flags.
+It does not admit `config.h` or prove probe tool/input provenance from raw `config.log`.
+Environment closure, site discovery, sysdeps selection, and output replay remain explicitly unproved.
+Both `admitted` and `release_qualified` remain false.
+No workflow or Dockerfile change is needed; existing native triggers and config checks already cover these paths.
+
+Coordinator verification: `env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -q`
+discovered 240 tests: 215 passed and 25 skipped, with no failures or errors.
+The writer's focused suite discovered 33 tests: 31 passed and two native checks skipped.
+Against retained `38153282130` evidence, the focused suite passed 33 tests on each architecture, without skips.
+Old receipts have no new capture. These checks verify rejection contracts, not native capture completeness.
+Independent stopped-worktree qualification confirmed 240 discovered, 215 passed, and 25 skipped, with no failures or errors.
+Both retained `38165498820` config suites passed 33 tests without skips.
+Each retained GNU suite discovered 22 tests: 19 passed, two skipped, and one rejected `Missing actual constant producer`.
+Both hosted GNU acceptance suites reported 22 tests: 20 passed, one skipped, and the same producer rejection.
+The two local GNU skips require GNU awk and signed Debian index evidence.
+All eight workflow YAML files parsed; `git diff --check` passed.
+Independent review found no confirmed new material contract defect in the three changed source/test files.
+Native capture verification remains unfinished; none of these checks authorizes image release or promotion.
+
+Next executable source action: consume the next reviewed push-triggered GNU run on both native architectures.
+Check every capture hash and selected-source binding, then retain probe bytes before configure cleanup.
+Pinned glibc configure deletes `conftest*` and `confdefs*`; post-configure capture cannot recover those inputs.
+Instrument actual pre-cleanup probe commands with exact tool/input/result evidence before producer admission.
+Then close `soversions.i`, remaining generated-header families, and source-built libgcc/final-link provenance.
+Security coverage, authenticated independent approval, native repeats, public evidence, and signature gates remain required.
+Architect owns restart/integration; linux owns the next scoped configure producer implementation.
+An independent qualification owner must review stopped changes and exact native evidence before any admission.
+
 ## Conversion Ledger
 
 Implemented first slices now exist for Debian, Ubuntu, and Alpine.

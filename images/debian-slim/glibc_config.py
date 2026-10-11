@@ -44,7 +44,7 @@ def checked(root, name, digest):
     return data
 
 
-def verify_config_sources(evidence, inputs):
+def verify_config_sources(evidence, inputs, names=SOURCE_NAMES):
     """Replay only the selected sources from checksum-pinned vendor archives."""
     evidence, inputs = Path(evidence), Path(inputs)
     materials = next(item[-1] for item in SOURCES if item[0] == "glibc")
@@ -58,10 +58,13 @@ def verify_config_sources(evidence, inputs):
     with tempfile.TemporaryDirectory(prefix="glibc-config-source-") as directory:
         root = Path(directory)
         with tarfile.open(inputs / "glibc_2.41.orig.tar.xz") as archive:
-            for name in SOURCE_NAMES:
+            for name in names:
+                if not name or Path(name).is_absolute() or ".." in Path(name).parts:
+                    raise ValueError("Invalid config source name")
                 member = archive.getmember("glibc-2.41/" + name)
                 if not member.isfile():
                     raise ValueError("Invalid config source archive member")
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
                 (root / name).write_bytes(archive.extractfile(member).read())
         with tarfile.open(inputs / "glibc_2.41-12+deb13u4.debian.tar.xz") as archive:
             series = archive.extractfile("debian/patches/series").read().decode().splitlines()
@@ -78,17 +81,69 @@ def verify_config_sources(evidence, inputs):
                 if hashlib.sha256(data).hexdigest() != patches.get(name):
                     raise ValueError("Unverified config source patch")
                 subprocess.run(["git", "apply", "-p1", *[
-                    "--include=" + source for source in SOURCE_NAMES]],
+                    "--include=" + source for source in names]],
                     input=data, cwd=root, check=True, capture_output=True)
             if seen != set(patches):
                 raise ValueError("Config source patch list mismatch")
         sources = []
-        for name in SOURCE_NAMES:
+        for name in names:
             digest = hashlib.sha256((root / name).read_bytes()).hexdigest()
             if snapshot.get(SOURCE_ROOT + name) != {"component": "glibc", "sha256": digest}:
                 raise ValueError("Config source snapshot mismatch: " + name)
             sources.append({"path": SOURCE_ROOT + name, "component": "glibc", "sha256": digest})
     return sources
+
+
+def inspect_capture(evidence, inputs, trace):
+    digest = trace.get("configure_capture_sha256")
+    if digest is None:
+        return None
+    capture = json.loads(checked(evidence, "glibc-configure-capture.json", digest))
+    if (capture.get("schema_version") != 1 or capture.get("scope") != "glibc-configure-capture"
+            or any(capture.get(key) is not False for key in
+                   ("admitted", "release_qualified", "environment_complete",
+                    "sysdeps_selection_verified", "probe_provenance_verified", "output_replayed"))):
+        raise ValueError("Unproved configure capture admission")
+    if capture.get("command") != trace["commands"][0] or capture.get("cwd") != str(Path(CONFIG).parent):
+        raise ValueError("Configure capture invocation mismatch")
+    references = capture["files"]
+    keys = [(item["path"], item["role"]) for item in references]
+    if len(keys) != len(set(keys)):
+        raise ValueError("Duplicate configure capture input")
+    retained = Path(evidence) / "sources/configure"
+    if {path.name for path in retained.iterdir()} != {item["sha256"] for item in references}:
+        raise ValueError("Unlisted or missing configure capture input")
+    names = []
+    outputs = set()
+    for item in references:
+        checked(retained, item["sha256"], item["sha256"])
+        if item["role"] == "source":
+            if not item["path"].startswith(SOURCE_ROOT):
+                raise ValueError("Invalid configure capture source")
+            names.append(item["path"][len(SOURCE_ROOT):])
+        elif item["role"] not in ("output", "pre-cache", "site"):
+            raise ValueError("Invalid configure capture role")
+        if item["role"] in ("output", "pre-cache"):
+            path = item["path"]
+            if posixpath.dirname(path) != capture["cwd"]:
+                raise ValueError("Invalid configure capture output path")
+            if item["role"] == "output":
+                outputs.add(posixpath.basename(path))
+    required = {"config.h", "config.status", "config.log", "confdefs.h", "config.make", "config.cache"}
+    if outputs - required or set(capture["missing_outputs"]) != required - outputs:
+        raise ValueError("Configure capture missing output list mismatch")
+    if not set(SOURCE_NAMES).issubset(names):
+        raise ValueError("Missing configure capture source")
+    sources = verify_config_sources(evidence, inputs, tuple(names))
+    expected = {item["path"]: item for item in sources}
+    for item in references:
+        if item["role"] == "source" and expected.get(item["path"]) != {
+                key: item.get(key) for key in ("path", "component", "sha256")}:
+            raise ValueError("Configure capture source binding mismatch")
+        if item["path"] == CONFIG and item["role"] == "output":
+            if item["sha256"] != trace["unknown_inputs"][CONFIG]:
+                raise ValueError("Configure capture output mismatch")
+    return capture
 
 
 def inspect_retained_config(evidence, inputs):
@@ -137,10 +192,12 @@ def inspect_retained_config(evidence, inputs):
     commands = trace.get("commands", [])
     if not commands or not commands[0] or commands[0][0] != SOURCE_ROOT + "configure":
         raise ValueError("Missing claimed configure invocation")
+    capture = inspect_capture(evidence, inputs, trace)
     return {"schema_version": 1, "scope": "glibc-config-retained-blocker",
             "release_qualified": False, "admitted": False,
             "config_path": CONFIG, "sha256": digest, "sources": sources,
             "claimed_command": commands[0], "invocation_verified": False,
+            "capture": capture,
             "retained_consumers": consumed, "unproved_generation_inputs": sorted(unproved),
             "output_replayed": False, "blockers": list(BLOCKERS)}
 
