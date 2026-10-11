@@ -28,6 +28,51 @@ with patch.dict(sys.modules, {"bootstrap": BOOTSTRAP}):
 
 
 class GnuBootstrapTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_HEADER_EVIDENCE"),
+                         "Real GNU source and header inputs are required")
+    def test_source_make_recipes_reproduce_retained_headers(self):
+        from test_source_origins import headers
+
+        inputs = Path(os.environ["GNU_BOOTSTRAP_INPUTS"])
+        report = json.loads((Path(os.environ["GNU_HEADER_EVIDENCE"]) / "gnu-headers.json").read_text())
+        expected = {item["path"]: item["sha256"] for item in report["headers"]}
+        architecture = "aarch64" if any("aarch64" in name for name in expected) else "x86"
+        constructor = tempfile.TemporaryDirectory
+        with constructor() as directory:
+            root = Path(directory).resolve()
+            retained = root / "retained"
+            retained.mkdir()
+            with tarfile.open(inputs / "glibc_2.41.orig.tar.xz") as archive:
+                files = {}
+                for name in ("Makerules", "Makeconfig", "sysdeps/unix/sysv/linux/" + architecture + "/Makefile"):
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(archive.extractfile("glibc-2.41/" + name).read())
+                    files[name] = path
+            wrapper = re.search(r"^\$\(common-objpfx\)gnu/lib-names.h:\n.*?(?=^endif$)",
+                                files["Makerules"].read_text(), re.M | re.S).group()
+            defaults = re.search(r"^ifndef abi-includes\n.*?^endif$", files["Makeconfig"].read_text(), re.M | re.S).group()
+            paths = list(files.values())
+            index = {str(path): {"component": "glibc", "sha256": headers.sha256(path)} for path in paths}
+            abi = paths[-1]
+            body = defaults + "\ninclude " + str(abi) + "\ncommon-objpfx :=\n" + wrapper
+            with patch.object(headers.tempfile, "TemporaryDirectory", side_effect=lambda **kw: constructor(dir=root)):
+                result = headers.make_header("glibc", paths, body, "gnu/lib-names.h", index, retained,
+                                             ["default-abi=" + ("lp64" if architecture == "aarch64" else "64")])
+            self.assertEqual(result["sha256"], expected["/build/source-sysroot/usr/include/gnu/lib-names.h"])
+            with tarfile.open(inputs / "linux_6.12.107.orig.tar.xz") as archive:
+                path = root / "kernel.Makefile"
+                path.write_bytes(archive.extractfile("linux-6.12.107/Makefile").read())
+            text = path.read_text()
+            values = "\n".join(re.findall(r"^(?:VERSION|PATCHLEVEL|SUBLEVEL) = [0-9]+$", text, re.M))
+            macro = re.search(r"^define filechk_version.h\n.*?^endef$", text, re.M | re.S).group()
+            index = {str(path): {"component": "linux", "sha256": headers.sha256(path)}}
+            with patch.object(headers.tempfile, "TemporaryDirectory", side_effect=lambda **kw: constructor(dir=root)):
+                result = headers.make_header("linux", [path], values + "\n" + macro +
+                                             "\nversion.h:\n\t{ $(filechk_version.h); } > $@\n",
+                                             "version.h", index, retained)
+            self.assertEqual(result["sha256"], expected["/build/linux/linux-6.12.107/usr/include/linux/version.h"])
+
     @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS"), "Real GNU source inputs are required")
     def test_locked_archives_and_descriptor_bindings(self):
         inputs = Path(os.environ["GNU_BOOTSTRAP_INPUTS"])
@@ -159,6 +204,9 @@ class GnuBootstrapTests(unittest.TestCase):
                     self.assertEqual(producer["sha256"], header["sha256"])
                     self.assertTrue(producer["inputs"])
                     self.assertTrue(producer["command"])
+                    if producer.get("recipe_sha256"):
+                        recipe = evidence / "header-inputs" / producer["recipe_sha256"]
+                        self.assertEqual(hashlib.sha256(recipe.read_bytes()).hexdigest(), producer["recipe_sha256"])
                     for source in producer["inputs"]:
                         self.assertEqual(source_files[source["path"]],
                                          {"sha256": source["sha256"], "component": source["component"]})
