@@ -54,6 +54,12 @@ class SourceReleaseTests(unittest.TestCase):
             with patch.object(source, 'OUT', staged):
                 source.handoff()
             self.assertIn('--draft', run.call_args.args)
+            self.assertIn('--verify-tag', run.call_args.args)
+            commands = [call.args for call in run.call_args_list]
+            self.assertEqual(commands[-2], ('git', '-c', 'credential.helper=', '-c',
+                'credential.helper=!gh auth git-credential', 'push',
+                'https://github.com/rootloom/base-images.git', HASH + ':refs/tags/' + source.handoff_tag()))
+            self.assertEqual(commands[-1][:3], ('gh', 'release', 'create'))
             assets = {p.name: p.read_bytes() for p in staged.iterdir() if p.is_file()}
             def command(*args, **kwargs):
                 if args[:3] == ('gh', 'release', 'view'):
@@ -85,6 +91,17 @@ class SourceReleaseTests(unittest.TestCase):
                     source.handoff(restore=True)
                 self.assertFalse(destination.exists())
                 assets = original
+
+    def test_failed_source_tag_push_blocks_draft_creation(self):
+        env = dict(GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='2', GITHUB_SHA=HASH)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env), patch.object(source, 'OUT', Path(tmp)):
+            source.write_json(Path(tmp) / 'attempt.json', {'status': 'blocked'})
+            with patch.object(source, 'run', side_effect=source.subprocess.CalledProcessError(1, 'git push')) as run:
+                with self.assertRaises(source.subprocess.CalledProcessError):
+                    source.handoff()
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0], 'git')
+            self.assertNotIn('--force', run.call_args.args)
 
     def test_skipped_check_does_not_create_handoff(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(source, 'OUT', Path(tmp)), patch.dict(os.environ, {'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}), patch.object(source, 'run') as run:

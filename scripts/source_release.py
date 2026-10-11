@@ -491,8 +491,11 @@ def handoff(restore=False, arch=None):
                                     'assets': {p.name: sha(p) for p in paths}})
         print((OUT / descriptor).read_text())
         if arch is None:
+            # Push the exact source tag before the Releases API checks workflow scope.
+            run('git', '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential',
+                'push', 'https://github.com/' + repo + '.git', os.environ['GITHUB_SHA'] + ':refs/tags/' + tag)
             run('gh', 'release', 'create', tag, '--repo', repo, '--target', os.environ['GITHUB_SHA'],
-                '--draft', '--title', tag, '--notes', 'Incomplete source qualification. No promotion.',
+                '--verify-tag', '--draft', '--title', tag, '--notes', 'Incomplete source qualification. No promotion.',
                 *[str(p) for p in [*paths, OUT / descriptor]])
         else:
             run('gh', 'release', 'upload', tag, '--repo', repo, *[str(p) for p in [*paths, OUT / descriptor]])

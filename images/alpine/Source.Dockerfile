@@ -17,7 +17,7 @@ FROM scratch AS runtime
 COPY --from=compile /rootfs/ /
 LABEL org.opencontainers.image.title="Rootloom Alpine-derived source runtime"
 LABEL org.opencontainers.image.description="Alpine 3.24 patched musl and BusyBox subset; no apk or init services; bootstrap compiler disclosed"
-ENV HOME=/home/rootloom PATH=/bin:/usr/bin
+ENV HOME=/home/rootloom PATH=/bin:/usr/bin SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 WORKDIR /app
 USER 65532:65532
 CMD ["/bin/sh"]
