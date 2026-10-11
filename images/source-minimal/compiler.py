@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import posixpath
 import re
 import shlex
 import subprocess
@@ -21,9 +22,15 @@ def reject_assembler_imports(text):
         raise ValueError("Assembler file imports are not allowed")
 
 
-def dependency_inputs(text):
+def dependency_inputs(text, cwd=None):
     rule = text.replace("\\\n", " ").splitlines()[0]
-    return [Path(name).resolve() for name in shlex.split(rule.split(":", 1)[1])]
+    names = shlex.split(rule.split(":", 1)[1])
+    if cwd is None:
+        return [Path(name).resolve() for name in names]
+    if not isinstance(cwd, str) or not posixpath.isabs(cwd):
+        raise ValueError("Retained dependency cwd must be absolute")
+    # Offline evidence uses the recorded build paths, not the verifier filesystem.
+    return [Path(posixpath.normpath(posixpath.join(cwd, name))) for name in names]
 
 
 def link_scripts(args):

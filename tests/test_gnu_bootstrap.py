@@ -39,6 +39,12 @@ class GnuBootstrapTests(unittest.TestCase):
             spec.loader.exec_module(runtime)
         return runtime
 
+    def test_runtime_loader_does_not_require_prior_compiler_import(self):
+        with patch.dict(sys.modules):
+            sys.modules.pop("compiler", None)
+            runtime = self.constant_runtime()
+            self.assertTrue(callable(runtime.generated_inputs))
+
     def test_constant_replay_requires_verified_scripts_symbols_and_stdin(self):
         runtime = self.constant_runtime()
         with tempfile.TemporaryDirectory() as directory:
@@ -78,7 +84,7 @@ class GnuBootstrapTests(unittest.TestCase):
             (generations / "inputs" / runtime.sha256(header)).write_bytes(header.read_bytes())
             (generations / "probe.s").write_bytes(assembly)
             (generations / "probe.d").write_text("test.s: " + str(header) + "\n")
-            record = {"inputs": [{"path": "<stdin>", "sha256": stdin_digest},
+            record = {"cwd": str(root), "inputs": [{"path": "<stdin>", "sha256": stdin_digest},
                                   {"path": str(header), "sha256": runtime.sha256(header)}],
                       "assembly": "probe.s", "assembly_sha256": runtime.sha256(generations / "probe.s"),
                       "dependencies": "probe.d", "dependencies_sha256": runtime.sha256(generations / "probe.d")}
@@ -109,6 +115,21 @@ class GnuBootstrapTests(unittest.TestCase):
             (compilation / "probe.json").write_text(json.dumps({"inputs": [
                 {"path": "/build/glibc-runtime/offsets.h", "sha256": proof["sha256"]}]}))
             self.assertEqual(runtime.verify_constant_proofs(evidence, receipt, snapshot), 1)
+            (generations / "relative.d").write_text("test.s: ../source.h\n")
+            relative = {**record, "cwd": str(root / "subdir"), "dependencies": "relative.d",
+                        "dependencies_sha256": runtime.sha256(generations / "relative.d")}
+            (generations / "relative.json").write_text(json.dumps(relative))
+            receipt["generation_records"]["relative.json"] = runtime.sha256(generations / "relative.json")
+            with patch.dict(proof, {"generation_record": "relative.json",
+                                   "generation_record_sha256": receipt["generation_records"]["relative.json"]}):
+                self.assertEqual(runtime.verify_constant_proofs(evidence, receipt, snapshot), 1)
+            (generations / "relative.json").unlink()
+            blocked = {"sha256": runtime.sha256(header), "admitted": False}
+            with patch.dict(receipt["verified_inputs"], {str(header): blocked}), patch.dict(
+                    proof, {"generation_inputs": [{"path": str(header),
+                            "sha256": runtime.sha256(header), "producer": blocked}]}):
+                with self.assertRaisesRegex(ValueError, "Unverified generated constant dependency"):
+                    runtime.verify_constant_proofs(evidence, receipt, snapshot)
             (generations / "other.d").write_text("test.s: " + str(header) + " /unlisted.h\n")
             wrong = {**record, "dependencies": "other.d",
                      "dependencies_sha256": runtime.sha256(generations / "other.d")}
@@ -204,6 +225,93 @@ class GnuBootstrapTests(unittest.TestCase):
         for producers in ({}, {"/build/glibc-runtime/config.h": {"recipe_sha256": "a" * 64}}):
             with self.subTest(producers=producers), self.assertRaisesRegex(ValueError, "Missing actual constant producer"):
                 runtime.verify_constant_proofs(Path("unused"), {"verified_inputs": producers}, {})
+
+    def test_module_source_rule_keeps_unproved_dependency_blocked(self):
+        runtime = self.constant_runtime()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            libc = root / "libc"
+            (libc / "scripts").mkdir(parents=True)
+            (libc / "Makeconfig").write_text("built-modules = fixture\n\n"
+                "$(common-objpfx)libc-modules.h: $(common-objpfx)libc-modules.stmp; @:\n"
+                "$(common-objpfx)libc-modules.stmp: $(..)scripts/gen-libc-modules.awk \\\n"
+                "    $(common-objpfx)soversions.i\n"
+                '\t$(AWK) -v buildlist="$(subst -,_,$(built-modules))" -f $^ > ${@:stmp=T}\n'
+                "\t$(move-if-change) ${@:stmp=T} ${@:stmp=h}\n\ttouch $@\n\n")
+            (libc / "scripts/gen-libc-modules.awk").write_text(
+                'BEGIN { print "#define MODULE_" buildlist " 1" }\n')
+            (libc / "scripts/move-if-change").write_text('mv "$1" "$2"\n')
+            index = {str(path): {"component": "glibc", "sha256": runtime.sha256(path)}
+                     for path in (libc / "Makeconfig", *sorted((libc / "scripts").iterdir()))}
+            retained = root / "runtime-inputs"
+            retained.mkdir()
+            dependency = root / "soversions.i"
+            dependency.write_bytes(b"DEFAULT libc 6\n")
+            proof = runtime.replay_modules(libc, index, retained, dependency,
+                                           b"#define MODULE_fixture 1\n")
+            snapshot = {}
+            for item in proof["inputs"]:
+                original = item["path"]
+                item["path"] = "/build/glibc/glibc-2.41/" + str(Path(original).relative_to(libc))
+                snapshot[item["path"]] = index[original]
+            self.assertFalse(runtime.verify_modules_proof(root, proof, snapshot))
+            self.assertEqual(proof["blocked_inputs"], ["/build/glibc-runtime/soversions.i"])
+            with patch.dict(proof, {"admitted": True}):
+                with self.assertRaisesRegex(ValueError, "Unclosed"):
+                    runtime.verify_modules_proof(root, proof, snapshot)
+            with patch.dict(proof, {"inputs": proof["inputs"] + [proof["inputs"][0]]}):
+                with self.assertRaisesRegex(ValueError, "dependency list differs"):
+                    runtime.verify_modules_proof(root, proof, snapshot)
+            with patch.dict(proof, {"generated_inputs": proof["generated_inputs"] + [
+                    {"path": "/unlisted.h", "sha256": "a" * 64}]}):
+                with self.assertRaisesRegex(ValueError, "dependency list differs"):
+                    runtime.verify_modules_proof(root, proof, snapshot)
+            with self.assertRaisesRegex(ValueError, "Unverified module"):
+                runtime.verify_modules_proof(root, proof, {})
+            for item in proof["inputs"] + proof["generated_inputs"] + [
+                    {"sha256": proof["sha256"]}, {"sha256": proof["recipe_sha256"]}]:
+                path = retained / item["sha256"]
+                data = path.read_bytes()
+                path.write_bytes(data + b"tampered")
+                with self.assertRaisesRegex(ValueError, "evidence changed"):
+                    runtime.verify_modules_proof(root, proof, snapshot)
+                path.write_bytes(data)
+            with self.assertRaisesRegex(ValueError, "output mismatch"):
+                runtime.replay_modules(libc, index, retained, dependency, b"wrong output")
+            (libc / "scripts/gen-libc-modules.awk").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "Unverified module"):
+                runtime.replay_modules(libc, index, retained, dependency, b"wrong output")
+
+    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS"), "Real GNU source inputs are required")
+    def test_pinned_module_source_rule_replays_fixture_dependency(self):
+        runtime = self.constant_runtime()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            libc = root / "libc"
+            (libc / "scripts").mkdir(parents=True)
+            retained = root / "retained"
+            retained.mkdir()
+            index = {}
+            archive_path = Path(os.environ["GNU_BOOTSTRAP_INPUTS"]) / "glibc_2.41.orig.tar.xz"
+            materials = next(source[-1] for source in BOOTSTRAP.SOURCES if source[0] == "glibc")
+            digest = next(digest for name, digest in materials if name == archive_path.name)
+            self.assertEqual(runtime.sha256(archive_path), digest)
+            with tarfile.open(archive_path) as tar:
+                for name in ("Makeconfig", "scripts/gen-libc-modules.awk", "scripts/move-if-change"):
+                    path = libc / name
+                    path.write_bytes(tar.extractfile("glibc-2.41/" + name).read())
+                    index[str(path)] = {"component": "glibc", "sha256": runtime.sha256(path)}
+            text = (libc / "Makeconfig").read_text()
+            modules = re.search(r"^built-modules = (.*?)(?=^\n)", text, re.M | re.S).group(1)
+            modules = " ".join(modules.replace("\\\n", " ").split()).replace("-", "_")
+            dependency = root / "soversions.i"
+            dependency.write_bytes(b"DEFAULT libc 6\nDEFAULT ld ld.so.1\n")
+            expected = subprocess.check_output(["awk", "-v", "buildlist=" + modules, "-f",
+                str(libc / "scripts/gen-libc-modules.awk"), str(dependency)])
+            proof = runtime.replay_modules(libc, index, retained, dependency, expected)
+            self.assertEqual(proof["sha256"], hashlib.sha256(expected).hexdigest())
+            self.assertFalse(proof["admitted"])
+            self.assertIn(b"MODULE_libc", expected)
 
     def test_unknown_constant_dependency_has_no_producer_admission(self):
         runtime = self.constant_runtime()
@@ -419,10 +527,7 @@ class GnuBootstrapTests(unittest.TestCase):
     def test_runtime_recipes_reproduce_consumed_inputs(self):
         from test_source_origins import headers, origins
 
-        spec = importlib.util.spec_from_file_location("gnu_runtime", ROOT / "images/debian-slim/runtime.py")
-        runtime = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"headers": headers, "origins": origins}):
-            spec.loader.exec_module(runtime)
+        runtime = self.constant_runtime()
         evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
         report = json.loads((evidence / "gnu-libc-trace.json").read_text())
         machine = report["machine"]

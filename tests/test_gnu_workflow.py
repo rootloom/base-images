@@ -14,6 +14,8 @@ class GnuWorkflowTests(unittest.TestCase):
         self.assertIn("if: ${{ inputs.target == 'libgcc-evidence' }}", workflow)
         self.assertIn('GNU_LIBGCC_EVIDENCE: evidence/result', workflow)
         self.assertIn('-p test_gnu_libgcc.py -v', workflow)
+        self.assertIn('-p test_glibc_config.py -v', workflow)
+        self.assertIn('Verify retained configure boundary remains blocked', workflow)
         self.assertIn('runner: ubuntu-24.04-arm', workflow)
         self.assertIn('test "$(uname -m)" = "$EXPECTED_MACHINE"', workflow)
         self.assertIn('contents: read', workflow)

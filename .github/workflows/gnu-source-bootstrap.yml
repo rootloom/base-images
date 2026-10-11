@@ -9,12 +9,14 @@ on:
       - images/debian-slim/runtime.py
       - images/debian-slim/trace_compiler.py
       - images/debian-slim/libgcc.py
+      - images/debian-slim/glibc_config.py
       - images/debian-slim/source-keys.tar.gz
       - images/source-minimal/compiler.py
       - images/source-minimal/origins.py
       - scripts/gnu_bootstrap_inputs.py
       - tests/test_gnu_bootstrap.py
       - tests/test_gnu_libgcc.py
+      - tests/test_glibc_config.py
       - .github/workflows/gnu-source-bootstrap.yml
   workflow_dispatch:
     inputs:
@@ -72,6 +74,12 @@ jobs:
             *) printf '%s\n' 'Unsupported construction target' >&2; exit 1 ;;
           esac
           docker buildx build -f images/debian-slim/Bootstrap.Dockerfile --platform "linux/$ARCH" --build-context inputs=evidence/inputs --target "$TARGET" --output type=local,dest=evidence/result --progress plain .
+      - name: Verify retained configure boundary remains blocked
+        if: ${{ inputs.target != 'libgcc-evidence' }}
+        env:
+          GNU_BOOTSTRAP_INPUTS: evidence/inputs
+          GNU_RUNTIME_TRACE_EVIDENCE: evidence/result
+        run: python3 -m unittest discover -s tests -p test_glibc_config.py -v
       - name: Verify completed native evidence remains unqualified
         if: ${{ inputs.target != 'libgcc-evidence' }}
         env:

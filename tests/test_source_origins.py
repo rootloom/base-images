@@ -72,6 +72,16 @@ class SourceOrigins(unittest.TestCase):
         text = "object.o: /source.c \\\n /header.h\n/header.h:\n"
         self.assertEqual(compiler.dependency_inputs(text), [Path("/source.c"), Path("/header.h")])
 
+    def test_retained_dependencies_use_recorded_cwd_without_host_resolution(self):
+        text = "object.o: ../include/header.h /build/source.c ./input.c\n"
+        with patch.object(Path, "resolve", side_effect=AssertionError("Host resolution is forbidden")):
+            self.assertEqual(compiler.dependency_inputs(text, "/build/glibc/csu"),
+                             [Path("/build/glibc/include/header.h"), Path("/build/source.c"),
+                              Path("/build/glibc/csu/input.c")])
+        for cwd in ("relative", "", 1):
+            with self.subTest(cwd=cwd), self.assertRaisesRegex(ValueError, "cwd must be absolute"):
+                compiler.dependency_inputs(text, cwd)
+
     def test_assembly_generation_is_not_an_object_record(self):
         arguments = ["-c", "-S", "-o", "/build/generated.S", "/source.c"]
         with patch.object(compiler.subprocess, "run") as run:

@@ -210,6 +210,69 @@ The preflight repair is pushed as `4dfc21eea0094869afe39e1fee09a73c34ea93d5`.
 Its automatic GNU run `38153282130` passed source preflight and entered native compilation.
 No manual or duplicate dispatch occurred. Inspect existing runs before starting any new build.
 
+### Restart Continuation
+
+The user requested continuation after the TurenOS restart in task `job_12c41572e001u4wVbZXuC41bwe`.
+Architect verified that no predecessor writer remained active and the checkout was clean at `3b605c2`.
+Remote main advanced to `913609f17fb9b31c2c554dd8465a271900e2e0c1` through a status-only update.
+The checkout preserved that update by fast-forward. No factory, teammate, or duty configuration changed.
+
+Three fresh Team assignments were admitted through the supported runtime:
+
+| Task | Owned Work | Remaining Boundary |
+| --- | --- | --- |
+| `job_12c42a462001njF9Xtb1riB3iq` | Runtime source-rule replay and isolated recipe-loader correction | `libc-modules.h` depends on unproved `soversions.i`; proofs remain outside `verified_inputs` |
+| `job_12c42d36400140bLp9cP0yRlV1` | New `glibc_config.py` and dedicated tests | Config sources and consumers are verified; configure invocation, probes, and output remain unproved |
+| `job_12c42fc7c001xepP5vKn6EUTgY` | Independent new native archive and implementation checks | Failed native acceptance cannot qualify runtime closure |
+
+Coordinator integration reuses `compiler.dependency_inputs(text, cwd)` for retained dependency paths.
+An explicit absolute `cwd` uses lexical POSIX normalization, without resolving paths on the verifier host.
+Capture calls without `cwd` retain their existing behavior.
+Unknown generated dependencies and `admitted=false` dependencies cannot authorize constant proofs.
+The GNU workflow checks the retained configure boundary separately before native runtime acceptance.
+Neither check authorizes release, signing, or mutable tags.
+
+GNU run `38153282130` completed native compilation at exact `4dfc21eea0094869afe39e1fee09a73c34ea93d5`.
+Both hosted acceptance jobs failed with missing actual constants and a separate recipe-loader import error.
+The isolated loader correction removes the import error; it does not remove the provenance rejection.
+Source run `38152947832` also completed with failure. No duplicate dispatch or cancellation occurred.
+
+Quality retained both new archives under `evidence/gnu-hosted-38153282130-<arch>[.zip]`.
+GitHub digest checks and safe archive-path checks passed before extraction. Existing evidence was not replaced.
+
+| Architecture | Artifact ID | Archive SHA-256 | Archive Bytes |
+| --- | --- | --- | --- |
+| amd64 | `11707664038` | `7476c759e3ef5f00c7d4836c1d4c5a5660b2ad3cc1f79f47c1318d42e2cf861a` | 246195457 |
+| arm64 | `11708403015` | `bea549e9cc74253e979f8fbd3922858740b003b38ee8c31e2824e5a2f6526293` | 228825977 |
+
+The new receipts still contain 28 AMD64 and 21 ARM64 unknown inputs, with zero admitted constants.
+They have no libgcc receipt or module proof. Link maps still consume bootstrap `libgcc.a`.
+New module receipts retain exact source-rule replay bytes, but always report `admitted=false`.
+Their `soversions.i` dependency needs verified preprocessing, selected source lists, and configuration provenance.
+
+`inspect_retained_config(evidence, inputs)` returns a non-admitting, JSON-compatible blocker report.
+`require_config_producer(evidence, inputs)` rejects current evidence.
+The checker verifies selected configure/template sources through pinned vendor patch replay and checks retained consumer links.
+Current archives lack config.status/config.log bytes and complete configure probe capture.
+The next capture must include invocation, cwd, environment/cache, selected sysdeps sources, and every probe tool/input/result.
+Config.status replay alone cannot prove those probes.
+
+Run the config checks from the repository directory:
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 GNU_BOOTSTRAP_INPUTS=evidence/gnu-hosted-inputs GNU_RUNTIME_TRACE_EVIDENCE=evidence/gnu-hosted-38153282130-amd64 python3 -m unittest discover -s tests -p test_glibc_config.py -q
+```
+
+Repeat with the ARM64 directory. A passed blocker check confirms rejection, not native source qualification.
+Independent stopped-worktree verification discovered 230 tests: 205 passed and 25 skipped, with no failures or errors.
+Both new native config suites passed 23 tests, with no skips.
+Each native GNU suite discovered 22 tests: 19 passed, two skipped, and one rejected missing actual constants.
+The skips require GNU awk and signed Debian index evidence. They are not qualification passes.
+Independent changed-contract review found no confirmed new material defect; diff checks and workflow YAML parsing passed.
+All six genuine source-built public releases remain unfinished. Production promotion remains unconditionally blocked.
+The active duty still requires rootboss while the factory coordinator is architect; its mismatch remains confirmed.
+Duty expiry `2026-10-17T15:55:05Z` and signed-index expiry `2026-10-17T19:19:25Z` remain unchanged.
+
 ## Conversion Ledger
 
 Implemented first slices now exist for Debian, Ubuntu, and Alpine.

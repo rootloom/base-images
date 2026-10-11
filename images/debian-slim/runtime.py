@@ -17,6 +17,83 @@ from compiler import dependency_inputs
 from origins import input_origin, sha256
 
 
+def replay_modules(libc, source_files, retained, soversions, expected, awk="awk"):
+    inputs = [libc / name for name in
+              ("Makeconfig", "scripts/gen-libc-modules.awk", "scripts/move-if-change")]
+    references = []
+    for path in inputs:
+        digest = sha256(path)
+        if source_files.get(str(path.resolve())) != {"component": "glibc", "sha256": digest}:
+            raise ValueError("Unverified module producer source")
+        (retained / digest).write_bytes(path.read_bytes())
+        references.append({"path": str(path), "component": "glibc", "sha256": digest})
+    text = inputs[0].read_text()
+    modules = re.search(r"^built-modules = .*?(?=^\n)", text, re.M | re.S).group()
+    rule = re.search(r"^\$\(common-objpfx\)libc-modules.h:.*?(?=^\n)", text, re.M | re.S).group()
+    data = soversions.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    (retained / digest).write_bytes(data)
+    # Replay is not dependency admission: soversions.i still needs its own producer.
+    with tempfile.TemporaryDirectory(prefix="libc-modules-") as directory:
+        work = Path(directory)
+        (work / "soversions.i").write_bytes(data)
+        body = (".. := " + str(libc) + "/\ncommon-objpfx :=\nAWK := " + awk +
+                "\nSHELL := /bin/sh\nmove-if-change = $(SHELL) $(..)scripts/move-if-change\n" +
+                modules + "\n" + rule + "\n")
+        recipe = work / "Makefile"
+        recipe.write_text(body)
+        recipe_digest = sha256(recipe)
+        (retained / recipe_digest).write_bytes(recipe.read_bytes())
+        command = ["make", "-f", str(recipe), "libc-modules.h"]
+        subprocess.run(command, cwd=work, env={**os.environ, "LC_ALL": "C"},
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        output = (work / "libc-modules.h").read_bytes()
+    if output != expected:
+        raise ValueError("Module source-rule replay output mismatch")
+    output_digest = hashlib.sha256(output).hexdigest()
+    (retained / output_digest).write_bytes(output)
+    return {"replay": "glibc-libc-modules-source-rule", "admitted": False,
+            "sha256": output_digest, "inputs": references,
+            "generated_inputs": [{"path": "/build/glibc-runtime/soversions.i", "sha256": digest}],
+            "blocked_inputs": ["/build/glibc-runtime/soversions.i"],
+            "recipe_sha256": recipe_digest, "command": command, "awk": awk}
+
+
+def verify_modules_proof(evidence, producer, source_files, awk="awk"):
+    if producer.get("admitted") is not False or producer.get("replay") != "glibc-libc-modules-source-rule":
+        raise ValueError("Unclosed module producer admission")
+    root = Path("/build/glibc/glibc-2.41")
+    names = {str(root / name) for name in
+             ("Makeconfig", "scripts/gen-libc-modules.awk", "scripts/move-if-change")}
+    if len(producer["inputs"]) != 3 or {item["path"] for item in producer["inputs"]} != names:
+        raise ValueError("Module source-rule dependency list differs")
+    generated = producer["generated_inputs"]
+    blocked = ["/build/glibc-runtime/soversions.i"]
+    if len(generated) != 1 or generated[0]["path"] != blocked[0] or producer["blocked_inputs"] != blocked:
+        raise ValueError("Module generated dependency list differs")
+    retained = evidence / "runtime-inputs"
+
+    def checked(digest):
+        if not re.fullmatch(r"[a-f0-9]{64}", digest) or sha256(retained / digest) != digest:
+            raise ValueError("Module producer evidence changed")
+        return retained / digest
+
+    checked(producer["recipe_sha256"])
+    with tempfile.TemporaryDirectory() as directory:
+        libc = Path(directory)
+        index = {}
+        for item in producer["inputs"]:
+            if source_files.get(item["path"]) != {"component": "glibc", "sha256": item["sha256"]} or item["component"] != "glibc":
+                raise ValueError("Unverified module producer source")
+            path = libc / Path(item["path"]).relative_to(root)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(checked(item["sha256"]).read_bytes())
+            index[str(path.resolve())] = {"component": "glibc", "sha256": item["sha256"]}
+        replay_modules(libc, index, libc, checked(generated[0]["sha256"]),
+                       checked(producer["sha256"]).read_bytes(), awk)
+    return False
+
+
 def replay_constants(libc, symbol, stdin, assembly, source_files, retained):
     inputs = [libc / "scripts/gen-as-const.py", libc / "scripts/glibcextract.py", symbol]
     references = []
@@ -95,7 +172,7 @@ def constant_inputs(libc, source_files, retained, generations, generated, work):
                 path = Path(item["path"])
                 relative = str(path.relative_to(work)) if path.is_relative_to(work) else None
                 producer = generated.get(relative)
-                if not producer or producer["sha256"] != item["sha256"]:
+                if not producer or producer.get("admitted") is False or producer["sha256"] != item["sha256"]:
                     break
                 dependencies.append({**item, "producer": producer})
         else:
@@ -152,7 +229,8 @@ def verify_constant_proofs(evidence, record, source_files):
             raise ValueError("Constant generation output changed")
         stdin = [item for item in generation["inputs"] if item["path"] == "<stdin>"]
         dependencies = [item for item in generation["inputs"] if item["path"] != "<stdin>"]
-        if {str(path) for path in dependency_inputs(dependency_file.read_text())} != {
+        cwd = generation.get("cwd", "")
+        if {str(path) for path in dependency_inputs(dependency_file.read_text(), cwd)} != {
                 item["path"] for item in dependencies}:
             raise ValueError("Constant dependency list differs from inputs")
         if len(stdin) != 1 or stdin[0]["sha256"] != producer["stdin_sha256"]:
@@ -165,7 +243,7 @@ def verify_constant_proofs(evidence, record, source_files):
         for item in links:
             if "producer" in item:
                 dependency = record["verified_inputs"].get(item["path"])
-                if dependency != item["producer"] or dependency["sha256"] != item["sha256"]:
+                if dependency != item["producer"] or dependency.get("admitted") is False or dependency["sha256"] != item["sha256"]:
                     raise ValueError("Unverified generated constant dependency")
                 if item["path"] in record["unknown_inputs"]:
                     raise ValueError("Unknown constant dependency")
@@ -324,6 +402,9 @@ def main():
     producer_inputs = evidence / "runtime-inputs"
     producer_inputs.mkdir()
     generated = generated_inputs(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs, os.uname().machine)
+    modules = replay_modules(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs,
+                             work / "soversions.i", (work / "libc-modules.h").read_bytes(),
+                             "/bootstrap/bin/gawk")
     constants = constant_inputs(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs,
                                 evidence / "sources/generation", generated, work)
     verified_inputs = {}
@@ -356,6 +437,7 @@ def main():
                "machine": os.uname().machine,
                "commands": commands, "compiler_records": len(records), "link_maps": link_maps,
                "generation_records": generation_records,
+               "source_rule_proofs": {str(work / "libc-modules.h"): modules},
                "unknown_inputs": unknown, "verified_inputs": verified_inputs, "libc_sha256": sha256(libc),
                "header_audit_sha256": sha256(evidence / "gnu-headers.json")}
     (evidence / "gnu-libc-trace.json").write_text(json.dumps(receipt, indent=2) + "\n")
