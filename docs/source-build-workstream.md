@@ -95,6 +95,67 @@ All six genuine distribution/source image releases remain unfinished. No FIPS or
 The existing duty remains active at 900 seconds, with its coordinator mismatch and October 17 expiry unchanged.
 Authorized duty repair and renewal are still needed before `2026-10-17T15:55:05Z`; no duplicate duty was created.
 
+### Active Goal Continuation
+
+The user requested continued Team work until all six source-built images pass the saved gates.
+Architect created an active delivery goal in task `job_12b9ce506001qXDcLJUNcazLIw`.
+Independent ownership checks found no remaining predecessor writer.
+The clean checkout advanced from `22d6315` to `5954deee481485ad2b21281503e20cfcbf710d11` by fast-forward.
+That remote change updated only `latest.md` and `status.json` through the public-status workflow.
+
+Three bounded Team tasks succeeded and stopped writes:
+
+| Task | Owned Paths | Delivered Check |
+| --- | --- | --- |
+| `job_12b9e4d72001Yym2pqS1uMRLBB` | `images/debian-slim/runtime.py`, `tests/test_gnu_bootstrap.py` | Require actual compiler-consumed constant proofs, retained generation links, pinned source scripts, and exact output replay |
+| `job_12b9e4d7b001EeRCz37Yb9hjz4` | `images/debian-slim/libgcc.py`, `tests/test_gnu_libgcc.py` | Verify retained native receipt bytes and reject unknown dependencies, changed archive members, or unsupported header admission |
+| `job_12b9e4d85001cA1iFApfHifMmC` | `scripts/source_approval.py`, `tests/test_source_approval.py` | Standalone authenticated standard-approval contract with exact candidate, evidence, workflow, and lifetime bindings |
+
+Coordinator integration also compares constant dependency-file paths with the recorded generation inputs.
+The GNU workflow now permits only `runtime-trace-evidence` or `libgcc-evidence` for manual construction.
+Push builds retain the runtime target. Each native job runs one selected build, not both targets.
+No manual dispatch or cancellation occurred during this integration.
+
+Approval verification uses snapshots of the signed JSON and Sigstore bundle.
+The caller must derive candidate hashes and approval-run trust independently of that JSON.
+The independent workflow must enforce its own run and attempt claims and perform actual qualification.
+The module does not perform qualification, authenticate GitHub run metadata, or authorize FIPS.
+Production promotion remains unconditionally blocked. No real approval bundle has passed verification.
+One independent adversarial review found no confirmed module-internal defect in the bounded approval surface.
+Independent local qualification ran 203 tests: 181 passed, 22 skipped, with no failures or errors.
+`git diff --check` passed. The GNU workflow also parsed with the installed Ruby YAML library.
+The qualification runner could not inspect source independently; architect inspected the scoped implementation.
+Approval tests use a mocked Cosign verifier and cannot establish real signature approval.
+
+Run native libgcc receipt verification from the repository directory:
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 GNU_LIBGCC_EVIDENCE=<retained-directory> python3 -m unittest discover -s tests -p test_gnu_libgcc.py -q
+```
+
+The retained directory must contain `gnu-libgcc.json` and all checksum-bound source, header, compiler, and artifact bytes.
+New receipts retain bootstrap `config.status` bytes under `sources/libgcc-producers/<sha256>`.
+Generated-header proofs still report `admitted=false`; configure and compiler-header closure remain blocking.
+Native constant acceptance requires both `GNU_BOOTSTRAP_INPUTS` and `GNU_RUNTIME_TRACE_EVIDENCE`.
+Missing proofs, skipped native tests, or synthetic fixtures cannot qualify closure.
+
+Direct inspection found source run `38149889442` completed with failure at `5dc596a`.
+Native quality and rootfs repeats passed, but scanner coverage remained partial and `CVE-2026-40200` blocked.
+The workflow published blocked evidence and rejected promotion.
+The current CNA record and upstream musl release page still list versions through `1.2.6` as affected.
+The existing qsort patch does not, by itself, remove the policy finding.
+Maintained compiler-rt numeric-builtins coverage remains unresolved.
+
+Next owners: `@linux` closes actual native generated dependencies and genuine distro runtime graphs.
+`@compiled` proves libgcc configure and compiler-header dependencies before runtime admission.
+`@release` qualifies a real independent approval workflow and exact bundle without removing the production guard early.
+`@quality` checks checksum-bound native artifacts from existing runs before any duplicate dispatch.
+Architect owns integration, final-link policy, all six release gates, and checkpointed continuation.
+The runtime rejected an additional quality task: `A teammate task can assign at most three child tasks`.
+No fourth Team task was created. A fresh coordinator occurrence must obtain independent Team quality capacity.
+Do not reset task records, change factory configuration, or duplicate builds to bypass this limit.
+The duty coordinator mismatch, duty expiry, and signed-index expiry remain unchanged.
+
 ## Conversion Ledger
 
 Implemented first slices now exist for Debian, Ubuntu, and Alpine.

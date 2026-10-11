@@ -17,6 +17,14 @@ on:
       - tests/test_gnu_libgcc.py
       - .github/workflows/gnu-source-bootstrap.yml
   workflow_dispatch:
+    inputs:
+      target:
+        description: Construction evidence target; neither target qualifies a release
+        type: choice
+        default: runtime-trace-evidence
+        options:
+          - runtime-trace-evidence
+          - libgcc-evidence
 permissions:
   contents: read
 env:
@@ -57,8 +65,15 @@ jobs:
       - name: Compile GNU source bootstrap offline
         env:
           ARCH: ${{ matrix.arch }}
-        run: docker buildx build -f images/debian-slim/Bootstrap.Dockerfile --platform "linux/$ARCH" --build-context inputs=evidence/inputs --target runtime-trace-evidence --output type=local,dest=evidence/result --progress plain .
+          TARGET: ${{ inputs.target || 'runtime-trace-evidence' }}
+        run: |
+          case "$TARGET" in
+            runtime-trace-evidence|libgcc-evidence) ;;
+            *) printf '%s\n' 'Unsupported construction target' >&2; exit 1 ;;
+          esac
+          docker buildx build -f images/debian-slim/Bootstrap.Dockerfile --platform "linux/$ARCH" --build-context inputs=evidence/inputs --target "$TARGET" --output type=local,dest=evidence/result --progress plain .
       - name: Verify completed native evidence remains unqualified
+        if: ${{ inputs.target != 'libgcc-evidence' }}
         env:
           GNU_BOOTSTRAP_INPUTS: evidence/inputs
           GNU_BOOTSTRAP_EVIDENCE: evidence/result
@@ -66,6 +81,11 @@ jobs:
           GNU_HEADER_EVIDENCE: evidence/result
           GNU_RUNTIME_TRACE_EVIDENCE: evidence/result
         run: python3 -m unittest discover -s tests -p test_gnu_bootstrap.py -v
+      - name: Verify completed native libgcc evidence remains unqualified
+        if: ${{ inputs.target == 'libgcc-evidence' }}
+        env:
+          GNU_LIBGCC_EVIDENCE: evidence/result
+        run: python3 -m unittest discover -s tests -p test_gnu_libgcc.py -v
       - name: State release boundary
         if: always()
         run: printf '%s\n' 'Temporary source bootstrap only. Final header/object provenance, runtime qualification, security coverage, public release evidence, and latest promotion remain required. No image or latest tag was published.' >> "$GITHUB_STEP_SUMMARY"

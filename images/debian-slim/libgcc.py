@@ -11,9 +11,140 @@ import tempfile
 
 from gcc_bootstrap import MATERIALS, SIGNER
 from origins import sha256, verify_record
+from compiler import dependency_inputs, reject_assembler_imports
 
 
 STARTUP = ("crtbegin.o", "crtbeginS.o", "crtbeginT.o", "crtend.o", "crtendS.o")
+
+
+def verify_retained_runtime(evidence):
+    """Check construction evidence offline; never grant release admission."""
+    evidence = Path(evidence).resolve()
+
+    def checked(path, digest):
+        if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+                or path.is_symlink() or not path.is_file()
+                or not path.resolve().is_relative_to(evidence) or sha256(path) != digest):
+            raise ValueError("Retained evidence checksum mismatch: " + str(path))
+        return path.read_bytes()
+
+    receipt = json.loads((evidence / "gnu-libgcc.json").read_text())
+    if (receipt.get("schema_version") != 1 or receipt.get("scope") != "gnu-libgcc-construction"
+            or receipt.get("release_qualified") is not False
+            or receipt.get("completed") is not True or receipt.get("runtime_verified") is not True
+            or receipt.get("machine") not in ("x86_64", "aarch64")):
+        raise ValueError("Incomplete or qualified libgcc construction receipt")
+    gcc = json.loads(checked(evidence / "gcc-bootstrap.json", receipt["gcc_preparation_sha256"]))
+    if (gcc.get("completed") is not True or gcc.get("materials") != dict(MATERIALS)
+            or gcc.get("signing_fingerprint") != SIGNER):
+        raise ValueError("Missing pinned Debian GCC preparation")
+    bootstrap = json.loads((evidence / "bootstrap.json").read_text())
+    sources = {item["name"]: item for item in bootstrap["sources"]}
+    sources["gcc"] = gcc
+    index = {}
+    for name in ("gcc", "glibc", "linux"):
+        digest = receipt["source_snapshots"][name]
+        if sources[name].get("completed") is not True or sources[name]["source_snapshot_sha256"] != digest:
+            raise ValueError("Source snapshot checksum mismatch: " + name)
+        snapshot = json.loads(checked(evidence / (name + ".source-files.json"), digest))
+        if not snapshot or any(item["component"] != name for item in snapshot.values()):
+            raise ValueError("Invalid source snapshot: " + name)
+        if index.keys() & snapshot.keys():
+            raise ValueError("Duplicate source snapshot path")
+        index.update(snapshot)
+    headers = json.loads(checked(evidence / "gnu-headers.json", receipt["header_audit_sha256"]))
+    if (headers.get("scope") != "source-header-audit" or headers.get("headers_verified") is not True
+            or not headers.get("headers") or receipt["headers"] != headers["headers"]):
+        raise ValueError("Missing verified source headers")
+    for header in headers["headers"]:
+        checked(evidence / "header-inputs" / header["sha256"], header["sha256"])
+        references = header["sources"] or (header.get("producer") or {}).get("inputs", [])
+        if header.get("verified") is not True or not references:
+            raise ValueError("Unverified installed header")
+        for item in references:
+            origin = index.get(item["path"])
+            if (not origin or origin["component"] != item["component"]
+                    or origin["sha256"] != item.get("sha256", origin["sha256"])
+                    or (header["sources"] and origin["sha256"] != header["sha256"])):
+                raise ValueError("Unverified header source reference")
+            checked(evidence / "header-inputs" / origin["sha256"], origin["sha256"])
+        producer = header.get("producer")
+        if producer and (producer.get("sha256") != header["sha256"] or not producer.get("command")):
+            raise ValueError("Installed header differs from producer")
+        index[header["path"]] = {"sha256": header["sha256"], "component": references[0]["component"]}
+    producers = evidence / "sources/libgcc-producers"
+    checked(producers / receipt["bootstrap_config_status_sha256"], receipt["bootstrap_config_status_sha256"])
+    proofs = receipt.get("generated_headers", [])
+    if sorted(Path(item["path"]).name for item in proofs) != ["auto-target.h", "libgcc_tm.h"]:
+        raise ValueError("Missing generated-header proofs")
+    for proof in proofs:
+        checked(producers / proof["sha256"], proof["sha256"])
+        if (proof.get("replay_verified") is not True or proof.get("admitted") is not False
+                or not proof.get("blocking_error") or not proof.get("commands") or not proof.get("inputs")):
+            raise ValueError("Unproved generated-header admission")
+        for item in proof["inputs"]:
+            checked(producers / item["sha256"], item["sha256"])
+            if item["kind"] == "source":
+                if index.get(item["path"]) != {"component": item["component"], "sha256": item["sha256"]}:
+                    raise ValueError("Unknown generated-header producer")
+            elif item["kind"] != "configure-output":
+                raise ValueError("Unknown generated-header input")
+    artifacts = receipt.get("artifacts", [])
+    if sorted(Path(item["path"]).name for item in artifacts) != sorted(("libgcc.a", "libgcc_eh.a", *STARTUP)):
+        raise ValueError("Missing or duplicate runtime artifacts")
+    retained = evidence / "sources/libgcc"
+    compilation = evidence / "sources/compilation"
+    for artifact in artifacts:
+        path = retained / artifact["sha256"]
+        data = checked(path, artifact["sha256"])
+        if Path(artifact["path"]).suffix == ".a":
+            if not data.startswith(b"!<arch>\n"):
+                raise ValueError("Runtime archive must not be thin")
+            members = subprocess.check_output(["ar", "t", str(path)], text=True).splitlines()
+            objects = artifact["members"]
+            if (not members or len(members) != len(set(members))
+                    or members != [item["name"] for item in objects]):
+                raise ValueError("Runtime archive members differ from receipt")
+        else:
+            objects = [artifact["object"]]
+        for obj in objects:
+            checked(retained / obj["sha256"], obj["sha256"])
+            if "members" in artifact:
+                if Path(obj["name"]).name != obj["name"]:
+                    raise ValueError("Invalid runtime archive member")
+                member = subprocess.check_output(["ar", "p", str(path), obj["name"]])
+                if hashlib.sha256(member).hexdigest() != obj["sha256"]:
+                    raise ValueError("Runtime archive member checksum mismatch")
+            elif artifact["sha256"] != obj["sha256"] or artifact["path"] != obj["path"]:
+                raise ValueError("Startup object differs from artifact")
+            record = json.loads(checked(retained / (obj["record_sha256"] + ".json"), obj["record_sha256"]))
+            if (record["object"] != obj["path"] or record["object_sha256"] != obj["sha256"]
+                    or not record["inputs"] or record["inputs"] != obj["inputs"]):
+                raise ValueError("Runtime object differs from compiler record")
+            command = record.get("command", [])
+            if ("-c" not in command or "-o" not in command
+                    or command.index("-o") + 1 >= len(command)
+                    or command[command.index("-o") + 1] != record["object"]):
+                raise ValueError("Missing runtime compilation command")
+            compiler_bytes = {}
+            for kind in ("preprocessed", "dependencies", "assembly"):
+                if Path(record[kind]).name != record[kind]:
+                    raise ValueError("Invalid compiler evidence path")
+                compiler_bytes[kind] = checked(compilation / record[kind], record[kind + "_sha256"])
+            reject_assembler_imports(compiler_bytes["assembly"].decode())
+            if {str(item) for item in dependency_inputs(compiler_bytes["dependencies"].decode())} != {
+                    item["path"] for item in record["inputs"]}:
+                raise ValueError("Compiler dependency list differs from inputs")
+            components = set()
+            for item in record["inputs"]:
+                origin = index.get(item["path"])
+                if not origin or origin["sha256"] != item["sha256"]:
+                    raise ValueError("Unknown runtime input: " + item["path"])
+                checked(compilation / "inputs" / item["sha256"], item["sha256"])
+                components.add(origin["component"])
+            if sorted(components) != obj["components"]:
+                raise ValueError("Runtime components differ from source inputs")
+    return receipt
 
 
 def replay_generated_headers(work, source, source_files, retained, environment):
@@ -196,6 +327,9 @@ def main():
                "bootstrap_config_status_sha256": sha256(original),
                "gcc_preparation_sha256": sha256(evidence / "gcc-bootstrap.json"),
                "header_audit_sha256": sha256(evidence / "gnu-headers.json")}
+    retained_config = evidence / "sources/libgcc-producers"
+    retained_config.mkdir(parents=True, exist_ok=True)
+    (retained_config / receipt["bootstrap_config_status_sha256"]).write_bytes(original.read_bytes())
     output = evidence / "gnu-libgcc.json"
     output.write_text(json.dumps(receipt, indent=2) + "\n")
     environment = {**os.environ, "PATH": "/gnu-bootstrap/bin:" + os.environ["PATH"]}

@@ -87,6 +87,101 @@ class GnuBootstrapTests(unittest.TestCase):
             proof = producers[producer["sha256"]]
             self.assertEqual(proof["generation_record_sha256"], runtime.sha256(generations / "probe.json"))
             self.assertEqual(proof["generation_inputs"][0]["sha256"], runtime.sha256(header))
+            evidence = root / "evidence"
+            (evidence / "sources").mkdir(parents=True)
+            (evidence / "sources/generation").symlink_to(generations, target_is_directory=True)
+            (evidence / "runtime-inputs").symlink_to(retained, target_is_directory=True)
+            traced = evidence / "sources/trace-inputs"
+            traced.mkdir()
+            (traced / proof["sha256"]).write_bytes(assembly)
+            record.update({"command": ["gcc", "-S"], "output_sha256": record["assembly_sha256"]})
+            (generations / "probe.json").write_text(json.dumps(record))
+            proof["generation_record_sha256"] = runtime.sha256(generations / "probe.json")
+            snapshot = dict(index)
+            for source in proof["inputs"]:
+                original = source["path"]
+                source["path"] = "/build/glibc/glibc-2.41/" + str(Path(original).relative_to(root))
+                snapshot[source["path"]] = snapshot[original]
+            receipt = {"verified_inputs": {"/build/glibc-runtime/offsets.h": proof}, "unknown_inputs": {},
+                       "generation_records": {"probe.json": proof["generation_record_sha256"]}}
+            compilation = evidence / "sources/compilation"
+            compilation.mkdir()
+            (compilation / "probe.json").write_text(json.dumps({"inputs": [
+                {"path": "/build/glibc-runtime/offsets.h", "sha256": proof["sha256"]}]}))
+            self.assertEqual(runtime.verify_constant_proofs(evidence, receipt, snapshot), 1)
+            (generations / "other.d").write_text("test.s: " + str(header) + " /unlisted.h\n")
+            wrong = {**record, "dependencies": "other.d",
+                     "dependencies_sha256": runtime.sha256(generations / "other.d")}
+            (generations / "other.json").write_text(json.dumps(wrong))
+            receipt["generation_records"]["other.json"] = runtime.sha256(generations / "other.json")
+            with patch.dict(proof, {"generation_record": "other.json",
+                                   "generation_record_sha256": receipt["generation_records"]["other.json"]}):
+                with self.assertRaisesRegex(ValueError, "dependency list differs"):
+                    runtime.verify_constant_proofs(evidence, receipt, snapshot)
+            (generations / "other.json").unlink()
+            with patch.dict(receipt["unknown_inputs"], {"/build/glibc-runtime/offsets.h": proof["sha256"]}):
+                with self.assertRaisesRegex(ValueError, "verified compiler input"):
+                    runtime.verify_constant_proofs(evidence, receipt, snapshot)
+            with patch.dict(receipt, {"verified_inputs": {"/build/glibc-runtime/not-consumed.h": proof}}):
+                with self.assertRaisesRegex(ValueError, "verified compiler input"):
+                    runtime.verify_constant_proofs(evidence, receipt, snapshot)
+            for field, bad in (("generation_record", "missing.json"),
+                               ("generation_record_sha256", "0" * 64),
+                               ("stdin_sha256", "0" * 64),
+                               ("generation_inputs", []),
+                               ("generation_inputs", [{"path": str(header), "sha256": "0" * 64,
+                                                       "component": "glibc"}]),
+                               ("sha256", "0" * 64)):
+                with self.subTest(field=field, bad=bad):
+                    original = proof[field]
+                    proof[field] = bad
+                    with self.assertRaises(ValueError):
+                        runtime.verify_constant_proofs(evidence, receipt, snapshot)
+                    proof[field] = original
+            for path in (generations / "probe.json", generations / "probe.s", generations / "probe.d",
+                         generations / "inputs" / runtime.sha256(header),
+                         generations / "inputs" / stdin_digest,
+                         retained / proof["inputs"][0]["sha256"], traced / proof["sha256"]):
+                with self.subTest(tampered=str(path)):
+                    original = path.read_bytes()
+                    path.write_bytes(original + b"changed")
+                    with self.assertRaises(ValueError):
+                        runtime.verify_constant_proofs(evidence, receipt, snapshot)
+                    path.write_bytes(original)
+                    path.unlink()
+                    with self.assertRaises((ValueError, FileNotFoundError)):
+                        runtime.verify_constant_proofs(evidence, receipt, snapshot)
+                    path.write_bytes(original)
+            wrong = {**record, "inputs": [{"path": "<stdin>", "sha256": stdin_digest}]}
+            (generations / "other.json").write_text(json.dumps(wrong))
+            receipt["generation_records"]["other.json"] = runtime.sha256(generations / "other.json")
+            with patch.dict(proof, {"generation_record": "other.json",
+                                   "generation_record_sha256": receipt["generation_records"]["other.json"]}):
+                with self.assertRaisesRegex(ValueError, "dependency list differs"):
+                    runtime.verify_constant_proofs(evidence, receipt, snapshot)
+            (generations / "other.json").unlink()
+            wrong = {**record, "object": "/build/bootstrap.o"}
+            (generations / "other.json").write_text(json.dumps(wrong))
+            receipt["generation_records"]["other.json"] = runtime.sha256(generations / "other.json")
+            with patch.dict(proof, {"generation_record": "other.json",
+                                   "generation_record_sha256": receipt["generation_records"]["other.json"]}):
+                with self.assertRaisesRegex(ValueError, "not assembly"):
+                    runtime.verify_constant_proofs(evidence, receipt, snapshot)
+            (generations / "other.json").unlink()
+            (generations / "other.s").write_bytes(b"#define offset 8\n")
+            wrong = {**record, "assembly": "other.s", "assembly_sha256": runtime.sha256(generations / "other.s"),
+                     "output_sha256": runtime.sha256(generations / "other.s")}
+            (generations / "other.json").write_text(json.dumps(wrong))
+            receipt["generation_records"]["other.json"] = runtime.sha256(generations / "other.json")
+            with patch.dict(proof, {"generation_record": "other.json",
+                                   "generation_record_sha256": receipt["generation_records"]["other.json"]}):
+                with self.assertRaisesRegex(ValueError, "replay output mismatch"):
+                    runtime.verify_constant_proofs(evidence, receipt, snapshot)
+            (generations / "other.json").unlink()
+            unknown = dict(snapshot)
+            unknown.pop(str(header))
+            with self.assertRaisesRegex(ValueError, "Unverified constant dependency"):
+                runtime.verify_constant_proofs(evidence, receipt, unknown)
             unknown_digest = hashlib.sha256(b"unknown producer stdin").hexdigest()
             (generations / "inputs" / unknown_digest).write_bytes(b"unknown producer stdin")
             record["inputs"][0]["sha256"] = unknown_digest
@@ -103,6 +198,12 @@ class GnuBootstrapTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     runtime.replay_constants(root, symbol, b"verified stdin", assembly, index, retained)
                 path.write_bytes(data)
+
+    def test_native_constant_acceptance_requires_actual_producer(self):
+        runtime = self.constant_runtime()
+        for producers in ({}, {"/build/glibc-runtime/config.h": {"recipe_sha256": "a" * 64}}):
+            with self.subTest(producers=producers), self.assertRaisesRegex(ValueError, "Missing actual constant producer"):
+                runtime.verify_constant_proofs(Path("unused"), {"verified_inputs": producers}, {})
 
     def test_unknown_constant_dependency_has_no_producer_admission(self):
         runtime = self.constant_runtime()
@@ -236,6 +337,10 @@ class GnuBootstrapTests(unittest.TestCase):
                 run.assert_not_called()
 
     def runtime_sources(self, root, evidence, machine):
+        inputs = Path(os.environ["GNU_BOOTSTRAP_INPUTS"])
+        materials = next(source[-1] for source in BOOTSTRAP.SOURCES if source[0] == "glibc")
+        for name, digest in materials:
+            self.assertEqual(hashlib.sha256((inputs / name).read_bytes()).hexdigest(), digest, name)
         snapshot = json.loads((evidence / "glibc.source-files.json").read_text())
         sysdirs = ["sysdeps/x86_64/64", "sysdeps/x86"] if machine == "x86_64" else ["sysdeps/aarch64"]
         names = ["math/Makefile", "locale/Makefile", "locale/gen-translit.py", "locale/C-translit.h.in",
@@ -244,9 +349,16 @@ class GnuBootstrapTests(unittest.TestCase):
                  "sysdeps/unix/sysv/linux/" + ("x86" if machine == "x86_64" else "aarch64") + "/Makefile",
                  "scripts/move-if-change", "Makeconfig", "scripts/gen-tunables.awk", *[
                      name + "/dl-tunables.list" for name in ["elf", "sysdeps/nptl", *sysdirs]]]
+        report = json.loads((evidence / "gnu-libc-trace.json").read_text())
+        for producer in report.get("verified_inputs", {}).values():
+            if producer.get("replay") == "verified-stdin-retained-assembly":
+                names.extend(str(Path(source["path"]).relative_to("/build/glibc/glibc-2.41"))
+                             for source in producer["inputs"])
+        names = list(dict.fromkeys(names))
         index = {}
         with tarfile.open(Path(os.environ["GNU_BOOTSTRAP_INPUTS"]) / "glibc_2.41.orig.tar.xz") as archive:
             for name in names:
+                self.assertNotIn("..", Path(name).parts)
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(archive.extractfile("glibc-2.41/" + name).read())
@@ -343,7 +455,8 @@ class GnuBootstrapTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 origins.input_origin(root / "math/Makefile", index)
 
-    @unittest.skipUnless(os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE"), "Native GNU runtime trace is required")
+    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE"),
+                         "Native GNU runtime trace and upstream source inputs are required")
     def test_native_runtime_trace_stays_unqualified(self):
         evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
         record = json.loads((evidence / "gnu-libc-trace.json").read_text())
@@ -384,6 +497,17 @@ class GnuBootstrapTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((evidence / "sources/trace-inputs" / digest).read_bytes()).hexdigest(), digest)
         self.assertGreaterEqual(len(record["verified_inputs"]), 10)
         source_files = json.loads((evidence / "glibc.source-files.json").read_text())
+        constant_sources = dict(source_files)
+        for component in ("gcc", "linux"):
+            constant_sources.update(json.loads((evidence / (component + ".source-files.json")).read_text()))
+        headers = json.loads((evidence / "gnu-headers.json").read_text())
+        for header in headers["headers"]:
+            self.assertIs(header["verified"], True)
+            references = header["sources"] or header["producer"]["inputs"]
+            constant_sources[header["path"]] = {"component": references[0]["component"], "sha256": header["sha256"]}
+        with tempfile.TemporaryDirectory() as directory:
+            self.runtime_sources(Path(directory).resolve(), evidence, record["machine"])
+        self.assertGreater(self.constant_runtime().verify_constant_proofs(evidence, record, constant_sources), 0)
         for name, producer in record["verified_inputs"].items():
             self.assertNotIn(name, record["unknown_inputs"])
             self.assertTrue(producer["command"])

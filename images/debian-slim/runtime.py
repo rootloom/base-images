@@ -9,9 +9,11 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import types
 
 from headers import make_header
+from compiler import dependency_inputs
 from origins import input_origin, sha256
 
 
@@ -113,6 +115,92 @@ def constant_inputs(libc, source_files, retained, generations, generated, work):
                                  "generation_inputs": dependencies, "stdin_sha256": stdin[0]["sha256"]})
                 result[producer["sha256"]] = producer
     return result
+
+
+def verify_constant_proofs(evidence, record, source_files):
+    constants = [(name, producer) for name, producer in record["verified_inputs"].items()
+                 if producer.get("replay") == "verified-stdin-retained-assembly"]
+    if not constants:
+        raise ValueError("Missing actual constant producer")
+    generations = evidence / "sources/generation"
+    retained = evidence / "runtime-inputs"
+    consumed = {(item["path"], item["sha256"])
+                for path in (evidence / "sources/compilation").glob("*.json")
+                for item in json.loads(path.read_text())["inputs"]}
+
+    def checked(root, name, digest):
+        if not re.fullmatch(r"[a-f0-9]{64}", digest) or Path(name).name != name:
+            raise ValueError("Invalid constant evidence reference")
+        path = root / name
+        if sha256(path) != digest:
+            raise ValueError("Constant evidence changed")
+        return path
+
+    for output, producer in constants:
+        if (output, producer["sha256"]) not in consumed or output in record["unknown_inputs"]:
+            raise ValueError("Constant output is not a verified compiler input")
+        name = producer["generation_record"]
+        digest = producer["generation_record_sha256"]
+        if record["generation_records"].get(name) != digest:
+            raise ValueError("Wrong constant generation record")
+        generation = json.loads(checked(generations, name, digest).read_text())
+        if "object" in generation or "-S" not in generation["command"]:
+            raise ValueError("Constant generation is not assembly")
+        assembly = checked(generations, generation["assembly"], generation["assembly_sha256"])
+        dependency_file = checked(generations, generation["dependencies"], generation["dependencies_sha256"])
+        if generation["output_sha256"] != generation["assembly_sha256"]:
+            raise ValueError("Constant generation output changed")
+        stdin = [item for item in generation["inputs"] if item["path"] == "<stdin>"]
+        dependencies = [item for item in generation["inputs"] if item["path"] != "<stdin>"]
+        if {str(path) for path in dependency_inputs(dependency_file.read_text())} != {
+                item["path"] for item in dependencies}:
+            raise ValueError("Constant dependency list differs from inputs")
+        if len(stdin) != 1 or stdin[0]["sha256"] != producer["stdin_sha256"]:
+            raise ValueError("Wrong constant generation stdin")
+        links = producer["generation_inputs"]
+        if not links or [{"path": item["path"], "sha256": item["sha256"]} for item in links] != dependencies:
+            raise ValueError("Wrong constant generation inputs")
+        for item in generation["inputs"]:
+            checked(generations / "inputs", item["sha256"], item["sha256"])
+        for item in links:
+            if "producer" in item:
+                dependency = record["verified_inputs"].get(item["path"])
+                if dependency != item["producer"] or dependency["sha256"] != item["sha256"]:
+                    raise ValueError("Unverified generated constant dependency")
+                if item["path"] in record["unknown_inputs"]:
+                    raise ValueError("Unknown constant dependency")
+                checked(retained, dependency["recipe_sha256"], dependency["recipe_sha256"])
+                for source in dependency["inputs"]:
+                    if source_files.get(source["path"]) != {"component": source["component"], "sha256": source["sha256"]}:
+                        raise ValueError("Unverified constant dependency source")
+                    checked(retained, source["sha256"], source["sha256"])
+            elif source_files.get(item["path"]) != {"component": item["component"], "sha256": item["sha256"]}:
+                raise ValueError("Unverified constant dependency")
+        with tempfile.TemporaryDirectory() as directory:
+            libc = Path(directory)
+            index = {}
+            names = []
+            for source in producer["inputs"]:
+                if source_files.get(source["path"]) != {"component": "glibc", "sha256": source["sha256"]} or source["component"] != "glibc":
+                    raise ValueError("Unverified constant producer source")
+                relative = Path(source["path"]).relative_to("/build/glibc/glibc-2.41")
+                if ".." in relative.parts:
+                    raise ValueError("Invalid constant producer path")
+                path = libc / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(checked(retained, source["sha256"], source["sha256"]).read_bytes())
+                index[str(path.resolve())] = {"component": "glibc", "sha256": source["sha256"]}
+                names.append(relative)
+            symbols = [name for name in names if name.suffix == ".sym"]
+            if len(names) != 3 or len(set(names)) != 3 or len(symbols) != 1 or not {
+                    Path("scripts/gen-as-const.py"), Path("scripts/glibcextract.py")}.issubset(names):
+                raise ValueError("Missing constant producer scripts or symbol")
+            replay = replay_constants(libc, libc / symbols[0],
+                (generations / "inputs" / stdin[0]["sha256"]).read_bytes(), assembly.read_bytes(), index, libc)
+            if replay["sha256"] != producer["sha256"]:
+                raise ValueError("Constant replay output mismatch")
+            checked(evidence / "sources/trace-inputs", producer["sha256"], producer["sha256"])
+    return len(constants)
 
 
 def loader_input(libc, source_files, retained):

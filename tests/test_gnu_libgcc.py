@@ -1,7 +1,8 @@
-"""Test GNU runtime admission with synthetic records, not native compilation."""
+"""Test fail-closed construction receipts; native checks require real evidence."""
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -35,10 +36,13 @@ class LibgccTests(unittest.TestCase):
             obj = self.work / name
             obj.write_bytes(("fresh " + name).encode())
             record = {"object": str(obj), "object_sha256": LIBGCC.sha256(obj),
+                      "command": ["gcc", "-c", str(source), "-o", str(obj)],
                       "inputs": [{"path": str(source), "sha256": LIBGCC.sha256(source)}]}
             for kind in ("preprocessed", "dependencies", "assembly"):
                 path = self.records / (name + "." + kind)
                 path.write_text("verified compiler evidence\n")
+                if kind == "dependencies":
+                    path.write_text("object: " + str(source) + "\n")
                 record[kind] = path.name
                 record[kind + "_sha256"] = LIBGCC.sha256(path)
             (self.records / (name + ".json")).write_text(json.dumps(record))
@@ -236,6 +240,158 @@ class LibgccTests(unittest.TestCase):
         (retained / LIBGCC.sha256(header)).write_bytes(b"bootstrap header")
         with self.assertRaisesRegex(ValueError, "Retained installed header changed"):
             LIBGCC.source_inputs(evidence)
+
+    def receipt_fixture(self):
+        source = self.generated_fixture()
+        evidence = self.root / "evidence"
+        (evidence / "sources").mkdir(parents=True)
+        directory = evidence / "sources/compilation"
+        self.records.rename(directory)
+        self.records = directory
+        self.retained = evidence / "sources/libgcc"
+        artifacts = self.inspect()
+        proofs = LIBGCC.replay_generated_headers(
+            self.work, source, self.index, evidence / "sources/libgcc-producers", {})
+        snapshots = {}
+        sources = []
+        for name in ("gcc", "glibc", "linux"):
+            index = self.index
+            if name != "gcc":
+                path = self.root / (name + ".c")
+                path.write_text("source\n")
+                index = {str(path): {"component": name, "sha256": LIBGCC.sha256(path)}}
+            path = evidence / (name + ".source-files.json")
+            path.write_text(json.dumps(index))
+            snapshots[name] = LIBGCC.sha256(path)
+            sources.append({"name": name, "completed": True, "source_snapshot_sha256": snapshots[name]})
+        gcc = {**sources[0], "materials": dict(LIBGCC.MATERIALS), "signing_fingerprint": LIBGCC.SIGNER}
+        (evidence / "gcc-bootstrap.json").write_text(json.dumps(gcc))
+        (evidence / "bootstrap.json").write_text(json.dumps({"sources": sources[1:]}))
+        digest = LIBGCC.sha256(self.source)
+        (evidence / "header-inputs").mkdir()
+        (evidence / "header-inputs" / digest).write_bytes(self.source.read_bytes())
+        headers = [{"path": str(self.source), "sha256": digest, "verified": True,
+                    "sources": [{"path": str(self.source), "component": "gcc"}], "producer": None}]
+        (evidence / "gnu-headers.json").write_text(json.dumps(
+            {"scope": "source-header-audit", "headers_verified": True, "headers": headers}))
+        receipt = {"schema_version": 1, "scope": "gnu-libgcc-construction", "release_qualified": False,
+                   "completed": True, "runtime_verified": True, "machine": "x86_64",
+                   "headers": headers, "source_snapshots": snapshots, "artifacts": artifacts,
+                   "generated_headers": proofs,
+                   "bootstrap_config_status_sha256": LIBGCC.sha256(self.work / "config.status"),
+                   "gcc_preparation_sha256": LIBGCC.sha256(evidence / "gcc-bootstrap.json"),
+                   "header_audit_sha256": LIBGCC.sha256(evidence / "gnu-headers.json")}
+        (evidence / "gnu-libgcc.json").write_text(json.dumps(receipt))
+        return evidence, receipt
+
+    def verify_fixture(self, evidence, receipt):
+        (evidence / "gnu-libgcc.json").write_text(json.dumps(receipt))
+        with patch.object(LIBGCC.subprocess, "check_output", side_effect=self.archive):
+            return LIBGCC.verify_retained_runtime(evidence)
+
+    def test_offline_fixture_is_construction_only_not_native_pass(self):
+        evidence, receipt = self.receipt_fixture()
+        self.source.unlink()
+        self.assertIs(self.verify_fixture(evidence, receipt)["release_qualified"], False)
+
+    def test_receipt_rejects_incomplete_or_release_scope(self):
+        evidence, receipt = self.receipt_fixture()
+        for field, value in (("scope", "release"), ("completed", False),
+                             ("runtime_verified", False), ("release_qualified", True)):
+            with self.subTest(field=field):
+                changed = {**receipt, field: value}
+                with self.assertRaisesRegex(ValueError, "construction receipt"):
+                    self.verify_fixture(evidence, changed)
+
+    def test_receipt_rejects_missing_or_tampered_retained_bytes(self):
+        evidence, receipt = self.receipt_fixture()
+        paths = [evidence / "sources/libgcc" / receipt["artifacts"][0]["sha256"],
+                 evidence / "sources/libgcc" / (receipt["artifacts"][0]["members"][0]["record_sha256"] + ".json"),
+                 evidence / "sources/compilation/inputs" / LIBGCC.sha256(self.source),
+                 evidence / "sources/libgcc-producers" / receipt["generated_headers"][0]["sha256"],
+                 evidence / "gcc.source-files.json", evidence / "gnu-headers.json"]
+        for path in paths:
+            original = path.read_bytes()
+            for tamper in (False, True):
+                with self.subTest(path=path, tamper=tamper):
+                    if tamper:
+                        path.write_bytes(b"tampered")
+                    else:
+                        path.unlink()
+                    with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                        self.verify_fixture(evidence, receipt)
+                    path.write_bytes(original)
+
+    def test_receipt_rejects_naming_only_artifacts(self):
+        evidence, receipt = self.receipt_fixture()
+        receipt["artifacts"][0]["members"][0]["components"] = ["trusted-by-name"]
+        with self.assertRaisesRegex(ValueError, "components differ"):
+            self.verify_fixture(evidence, receipt)
+
+    def test_receipt_rejects_unknown_dependency_even_with_matching_hashes(self):
+        evidence, receipt = self.receipt_fixture()
+        obj = receipt["artifacts"][0]["members"][0]
+        path = evidence / "sources/libgcc" / (obj["record_sha256"] + ".json")
+        record = json.loads(path.read_text())
+        record["inputs"][0]["path"] = "/unreviewed/compiler-header.h"
+        dependency = self.records / record["dependencies"]
+        dependency.write_text("object: /unreviewed/compiler-header.h\n")
+        record["dependencies_sha256"] = LIBGCC.sha256(dependency)
+        path.write_text(json.dumps(record))
+        obj["record_sha256"] = LIBGCC.sha256(path)
+        path.rename(path.with_name(obj["record_sha256"] + ".json"))
+        obj["inputs"] = record["inputs"]
+        with self.assertRaisesRegex(ValueError, "Unknown runtime input"):
+            self.verify_fixture(evidence, receipt)
+
+    def test_receipt_rejects_unlisted_dependency(self):
+        evidence, receipt = self.receipt_fixture()
+        obj = receipt["artifacts"][0]["members"][0]
+        path = evidence / "sources/libgcc" / (obj["record_sha256"] + ".json")
+        record = json.loads(path.read_text())
+        dependency = self.records / record["dependencies"]
+        dependency.write_text("object: " + str(self.source) + " /unknown.h\n")
+        record["dependencies_sha256"] = LIBGCC.sha256(dependency)
+        path.write_text(json.dumps(record))
+        obj["record_sha256"] = LIBGCC.sha256(path)
+        path.rename(path.with_name(obj["record_sha256"] + ".json"))
+        with self.assertRaisesRegex(ValueError, "dependency list differs"):
+            self.verify_fixture(evidence, receipt)
+
+    def test_receipt_rejects_missing_compilation_command(self):
+        evidence, receipt = self.receipt_fixture()
+        obj = receipt["artifacts"][0]["members"][0]
+        path = evidence / "sources/libgcc" / (obj["record_sha256"] + ".json")
+        record = json.loads(path.read_text())
+        del record["command"]
+        path.write_text(json.dumps(record))
+        obj["record_sha256"] = LIBGCC.sha256(path)
+        path.rename(path.with_name(obj["record_sha256"] + ".json"))
+        with self.assertRaisesRegex(ValueError, "Missing runtime compilation command"):
+            self.verify_fixture(evidence, receipt)
+
+    def test_receipt_rejects_generated_header_admission(self):
+        evidence, receipt = self.receipt_fixture()
+        receipt["generated_headers"][0]["admitted"] = True
+        with self.assertRaisesRegex(ValueError, "Unproved generated-header admission"):
+            self.verify_fixture(evidence, receipt)
+
+    def test_receipt_rejects_missing_generated_header_proof(self):
+        evidence, receipt = self.receipt_fixture()
+        receipt["generated_headers"].pop()
+        with self.assertRaisesRegex(ValueError, "Missing generated-header proofs"):
+            self.verify_fixture(evidence, receipt)
+
+    def test_receipt_rejects_changed_archive_member_bytes(self):
+        evidence, receipt = self.receipt_fixture()
+        with patch.object(LIBGCC.subprocess, "check_output", side_effect=["member.o\n", b"tampered"]):
+            with self.assertRaisesRegex(ValueError, "member checksum mismatch"):
+                LIBGCC.verify_retained_runtime(evidence)
+
+    @unittest.skipUnless(os.environ.get("GNU_LIBGCC_EVIDENCE"), "Retained native libgcc evidence is required")
+    def test_native_libgcc_construction_receipt(self):
+        receipt = LIBGCC.verify_retained_runtime(Path(os.environ["GNU_LIBGCC_EVIDENCE"]))
+        self.assertIs(receipt["release_qualified"], False)
 
 
 if __name__ == "__main__":
