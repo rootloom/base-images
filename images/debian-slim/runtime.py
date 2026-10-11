@@ -10,7 +10,7 @@ from headers import make_header
 from origins import input_origin, sha256
 
 
-def generated_inputs(libc, source_files, retained):
+def generated_inputs(libc, source_files, retained, machine, awk="/bootstrap/bin/gawk"):
     makefile = libc / "math/Makefile"
     text = makefile.read_text()
     rule = re.search(r"^\$\(objpfx\)gen-libm-templates.stmp: Makefile\n.*?(?=^\n)",
@@ -33,6 +33,33 @@ def generated_inputs(libc, source_files, retained):
     generated["locale/C-translit.h"] = make_header(
         "glibc", [makefile, script, libc / "locale/C-translit.h.in"], body,
         "locale/C-translit.h", source_files, retained)
+    vendor = {"x86_64": "pc", "aarch64": "unknown"}[machine]
+    variables = (".. := " + str(libc) + "/\ncommon-objpfx :=\nSHELL := /bin/sh\n" +
+                 "config-machine := " + machine + "\nbase-machine := " + machine + "\n" +
+                 "config-vendor := " + vendor + "\nconfig-os := linux-gnu\n" +
+                 "move-if-change = $(SHELL) $(..)scripts/move-if-change\n")
+    makefile = libc / "csu/Makefile"
+    rule = re.search(r"^\$\(objpfx\)abi-tag.h:.*?(?=^\n)", makefile.read_text(), re.M | re.S).group()
+    generated["csu/abi-tag.h"] = make_header(
+        "glibc", [makefile, libc / "abi-tags"],
+        variables + "objpfx := csu/\nmake-target-directory = mkdir -p csu\n" + rule + "\n",
+        "csu/abi-tag.h", source_files, retained)
+    makefile = libc / "Makerules"
+    rule = re.search(r"^\$\(common-objpfx\)libc-abis.h:.*?(?=^common-generated)",
+                     makefile.read_text(), re.M | re.S).group()
+    generated["libc-abis.h"] = make_header(
+        "glibc", [makefile, libc / "scripts/gen-libc-abis", libc / "libc-abis", libc / "scripts/move-if-change"],
+        variables + rule + "\n", "libc-abis.h", source_files, retained)
+    makefile = libc / "Makeconfig"
+    rule = re.search(r"^\$\(common-objpfx\)dl-tunable-list.h:.*?(?=^\n)",
+                     makefile.read_text(), re.M | re.S).group()
+    sysdirs = ["sysdeps/x86_64/64", "sysdeps/x86"] if machine == "x86_64" else ["sysdeps/aarch64"]
+    lists = [libc / (name + "/dl-tunables.list") for name in ["elf", "sysdeps/nptl", *sysdirs]]
+    generated["dl-tunable-list.h"] = make_header(
+        "glibc", [makefile, libc / "scripts/gen-tunables.awk", libc / "scripts/move-if-change", *lists],
+        variables + "AWK := " + awk + "\nsubdirs := sysdeps/nptl\nsysdirs := " +
+        " ".join(str(libc / name) for name in sysdirs) + "\n" + rule + "\n",
+        "dl-tunable-list.h", source_files, retained)
     return generated
 
 
@@ -73,7 +100,7 @@ def main():
     retained.mkdir()
     producer_inputs = evidence / "runtime-inputs"
     producer_inputs.mkdir()
-    generated = generated_inputs(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs)
+    generated = generated_inputs(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs, os.uname().machine)
     verified_inputs = {}
     for record in records:
         for item in record["inputs"]:
@@ -97,6 +124,7 @@ def main():
         raise ValueError("Missing GNU libc linker maps")
     libc = work / "libc.so"
     receipt = {"scope": "gnu-runtime-trace", "release_qualified": False, "completed": True,
+               "machine": os.uname().machine,
                "commands": commands, "compiler_records": len(records), "link_maps": link_maps,
                "unknown_inputs": unknown, "verified_inputs": verified_inputs, "libc_sha256": sha256(libc),
                "header_audit_sha256": sha256(evidence / "gnu-headers.json")}

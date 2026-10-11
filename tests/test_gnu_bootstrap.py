@@ -9,6 +9,7 @@ import lzma
 import os
 from pathlib import Path
 import re
+import shutil
 import sys
 import subprocess
 import tarfile
@@ -28,8 +29,8 @@ with patch.dict(sys.modules, {"bootstrap": BOOTSTRAP}):
 
 
 class GnuBootstrapTests(unittest.TestCase):
-    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE"),
-                         "Real GNU source and runtime inputs are required")
+    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE")
+                         and shutil.which("gawk"), "Real GNU source, runtime inputs, and GNU awk are required")
     def test_runtime_recipes_reproduce_consumed_inputs(self):
         from test_source_origins import headers, origins
 
@@ -40,12 +41,17 @@ class GnuBootstrapTests(unittest.TestCase):
         evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
         report = json.loads((evidence / "gnu-libc-trace.json").read_text())
         snapshot = json.loads((evidence / "glibc.source-files.json").read_text())
+        machine = report["machine"]
         constructor = tempfile.TemporaryDirectory
         with constructor() as directory:
             root = Path(directory).resolve()
             retained = root / "retained"
             retained.mkdir()
-            names = ["math/Makefile", "locale/Makefile", "locale/gen-translit.py", "locale/C-translit.h.in"]
+            sysdirs = ["sysdeps/x86_64/64", "sysdeps/x86"] if machine == "x86_64" else ["sysdeps/aarch64"]
+            names = ["math/Makefile", "locale/Makefile", "locale/gen-translit.py", "locale/C-translit.h.in",
+                     "csu/Makefile", "abi-tags", "Makerules", "libc-abis", "scripts/gen-libc-abis",
+                     "scripts/move-if-change", "Makeconfig", "scripts/gen-tunables.awk", *[
+                         name + "/dl-tunables.list" for name in ["elf", "sysdeps/nptl", *sysdirs]]]
             index = {}
             with tarfile.open(Path(os.environ["GNU_BOOTSTRAP_INPUTS"]) / "glibc_2.41.orig.tar.xz") as archive:
                 for name in names:
@@ -56,7 +62,7 @@ class GnuBootstrapTests(unittest.TestCase):
                     self.assertEqual(headers.sha256(path), source["sha256"])
                     index[str(path)] = source
             with patch.object(headers.tempfile, "TemporaryDirectory", side_effect=lambda **kw: constructor(dir=root)):
-                generated = runtime.generated_inputs(root, index, retained)
+                generated = runtime.generated_inputs(root, index, retained, machine, shutil.which("gawk"))
             expected = {**report["unknown_inputs"], **{
                 name: producer["sha256"] for name, producer in report.get("verified_inputs", {}).items()}}
             matched = 0
@@ -70,7 +76,7 @@ class GnuBootstrapTests(unittest.TestCase):
                 self.assertEqual(headers.sha256(retained / producer["recipe_sha256"]), producer["recipe_sha256"])
                 for source in producer["inputs"]:
                     self.assertEqual(headers.sha256(retained / source["sha256"]), source["sha256"])
-            self.assertGreaterEqual(matched, 4)
+            self.assertGreaterEqual(matched, 7)
             (root / "math/Makefile").write_text("gen-calls = unverifiedF\n")
             with self.assertRaises(ValueError):
                 origins.input_origin(root / "math/Makefile", index)
@@ -82,6 +88,7 @@ class GnuBootstrapTests(unittest.TestCase):
         self.assertEqual(record["scope"], "gnu-runtime-trace")
         self.assertIs(record["release_qualified"], False)
         self.assertIs(record["completed"], True)
+        self.assertIn(record["machine"], ("x86_64", "aarch64"))
         self.assertGreater(record["compiler_records"], 0)
         self.assertEqual(record["compiler_records"], len(list((evidence / "sources/compilation").glob("*.json"))))
         self.assertEqual(record["header_audit_sha256"], hashlib.sha256((evidence / "gnu-headers.json").read_bytes()).hexdigest())
@@ -92,7 +99,7 @@ class GnuBootstrapTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((evidence / "sources/link-maps" / name).read_bytes()).hexdigest(), digest)
         for digest in record["unknown_inputs"].values():
             self.assertEqual(hashlib.sha256((evidence / "sources/trace-inputs" / digest).read_bytes()).hexdigest(), digest)
-        self.assertGreaterEqual(len(record["verified_inputs"]), 4)
+        self.assertGreaterEqual(len(record["verified_inputs"]), 7)
         source_files = json.loads((evidence / "glibc.source-files.json").read_text())
         for name, producer in record["verified_inputs"].items():
             self.assertNotIn(name, record["unknown_inputs"])
