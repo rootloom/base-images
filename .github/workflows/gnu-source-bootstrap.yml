@@ -6,6 +6,8 @@ on:
       - images/debian-slim/Bootstrap.Dockerfile
       - images/debian-slim/*bootstrap.py
       - images/debian-slim/headers.py
+      - images/debian-slim/runtime.py
+      - images/debian-slim/trace_compiler.py
       - images/debian-slim/source-keys.tar.gz
       - images/source-minimal/compiler.py
       - images/source-minimal/origins.py
@@ -53,13 +55,14 @@ jobs:
       - name: Compile GNU source bootstrap offline
         env:
           ARCH: ${{ matrix.arch }}
-        run: docker buildx build -f images/debian-slim/Bootstrap.Dockerfile --platform "linux/$ARCH" --build-context inputs=evidence/inputs --target header-evidence --output type=local,dest=evidence/result --progress plain .
+        run: docker buildx build -f images/debian-slim/Bootstrap.Dockerfile --platform "linux/$ARCH" --build-context inputs=evidence/inputs --target runtime-trace-evidence --output type=local,dest=evidence/result --progress plain .
       - name: Verify completed native evidence remains unqualified
         env:
           GNU_BOOTSTRAP_INPUTS: evidence/inputs
           GNU_BOOTSTRAP_EVIDENCE: evidence/result
           GNU_COMPILER_EVIDENCE: evidence/result
           GNU_HEADER_EVIDENCE: evidence/result
+          GNU_RUNTIME_TRACE_EVIDENCE: evidence/result
         run: python3 -m unittest discover -s tests -p test_gnu_bootstrap.py -v
       - name: State release boundary
         if: always()

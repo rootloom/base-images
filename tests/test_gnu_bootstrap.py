@@ -28,6 +28,24 @@ with patch.dict(sys.modules, {"bootstrap": BOOTSTRAP}):
 
 
 class GnuBootstrapTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE"), "Native GNU runtime trace is required")
+    def test_native_runtime_trace_stays_unqualified(self):
+        evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
+        record = json.loads((evidence / "gnu-libc-trace.json").read_text())
+        self.assertEqual(record["scope"], "gnu-runtime-trace")
+        self.assertIs(record["release_qualified"], False)
+        self.assertIs(record["completed"], True)
+        self.assertGreater(record["compiler_records"], 0)
+        self.assertEqual(record["compiler_records"], len(list((evidence / "sources/compilation").glob("*.json"))))
+        self.assertEqual(record["header_audit_sha256"], hashlib.sha256((evidence / "gnu-headers.json").read_bytes()).hexdigest())
+        self.assertRegex(record["libc_sha256"], r"^[a-f0-9]{64}$")
+        self.assertTrue(record["link_maps"])
+        for name, digest in record["link_maps"].items():
+            self.assertEqual(Path(name).name, name)
+            self.assertEqual(hashlib.sha256((evidence / "sources/link-maps" / name).read_bytes()).hexdigest(), digest)
+        for digest in record["unknown_inputs"].values():
+            self.assertEqual(hashlib.sha256((evidence / "sources/trace-inputs" / digest).read_bytes()).hexdigest(), digest)
+
     @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_HEADER_EVIDENCE"),
                          "Real GNU source and header inputs are required")
     def test_source_make_recipes_reproduce_retained_headers(self):

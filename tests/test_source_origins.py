@@ -19,9 +19,29 @@ header_spec = importlib.util.spec_from_file_location("gnu_headers", RECIPE.paren
 headers = importlib.util.module_from_spec(header_spec)
 with patch.dict(sys.modules, {"origins": origins}):
     header_spec.loader.exec_module(headers)
+trace_spec = importlib.util.spec_from_file_location("gnu_trace_compiler", RECIPE.parent / "debian-slim/trace_compiler.py")
+trace = importlib.util.module_from_spec(trace_spec)
+with patch.dict(sys.modules, {"compiler": compiler}):
+    trace_spec.loader.exec_module(trace)
 
 
 class SourceOrigins(unittest.TestCase):
+    def test_gnu_link_trace_adds_distinct_maps(self):
+        with patch.object(trace.compiler, "main") as run, patch.object(Path, "mkdir"):
+            trace.main(["-o", "/build/libc.so", "object.o"])
+            first = run.call_args.args[0][-1]
+            trace.main(["-o", "/build/ld.so", "object.o"])
+            second = run.call_args.args[0][-1]
+        self.assertTrue(first.startswith("-Wl,-Map=/evidence/sources/link-maps/"))
+        self.assertNotEqual(first, second)
+
+    def test_gnu_compile_trace_does_not_add_link_map(self):
+        for arguments in (["-c", "-o", "/build/object.o"], ["-E", "-o", "/build/preprocessed.i"],
+                          ["-S", "-o", "/build/assembly.s"], ["-o", "/tmp/bootstrap-test"]):
+            with self.subTest(arguments=arguments), patch.object(trace.compiler, "main") as run:
+                trace.main(arguments)
+                run.assert_called_once_with(arguments)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

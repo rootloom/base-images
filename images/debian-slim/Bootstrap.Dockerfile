@@ -26,6 +26,13 @@ RUN --network=none python3 /recipe/headers.py
 FROM scratch AS header-evidence
 COPY --from=gnu-headers /evidence/ /
 
+FROM gnu-headers AS gnu-runtime-trace
+COPY images/debian-slim/runtime.py images/debian-slim/trace_compiler.py /recipe/
+RUN --network=none python3 /recipe/runtime.py
+
+FROM scratch AS runtime-trace-evidence
+COPY --from=gnu-runtime-trace /evidence/ /
+
 FROM scratch AS compiler-evidence
 COPY --from=gnu-compiler /evidence/ /
 
