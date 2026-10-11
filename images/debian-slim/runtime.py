@@ -152,10 +152,15 @@ def main():
     link_maps = {path.name: sha256(path) for path in sorted(maps.glob("*.map"))}
     if not link_maps:
         raise ValueError("Missing GNU libc linker maps")
+    generations = evidence / "sources/generation"
+    generation_records = {path.name: sha256(path) for path in sorted(generations.glob("*.json"))}
+    if len(generation_records) < 4:
+        raise ValueError("Missing GNU libc compiler generation records")
     libc = work / "libc.so"
     receipt = {"scope": "gnu-runtime-trace", "release_qualified": False, "completed": True,
                "machine": os.uname().machine,
                "commands": commands, "compiler_records": len(records), "link_maps": link_maps,
+               "generation_records": generation_records,
                "unknown_inputs": unknown, "verified_inputs": verified_inputs, "libc_sha256": sha256(libc),
                "header_audit_sha256": sha256(evidence / "gnu-headers.json")}
     (evidence / "gnu-libc-trace.json").write_text(json.dumps(receipt, indent=2) + "\n")

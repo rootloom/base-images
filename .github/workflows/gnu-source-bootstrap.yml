@@ -8,11 +8,13 @@ on:
       - images/debian-slim/headers.py
       - images/debian-slim/runtime.py
       - images/debian-slim/trace_compiler.py
+      - images/debian-slim/libgcc.py
       - images/debian-slim/source-keys.tar.gz
       - images/source-minimal/compiler.py
       - images/source-minimal/origins.py
       - scripts/gnu_bootstrap_inputs.py
       - tests/test_gnu_bootstrap.py
+      - tests/test_gnu_libgcc.py
       - .github/workflows/gnu-source-bootstrap.yml
   workflow_dispatch:
 permissions:

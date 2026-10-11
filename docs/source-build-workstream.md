@@ -14,6 +14,40 @@ The five distribution Dockerfiles still use binary upstream images and package r
 `source-minimal` has a compiled custom runtime, but unresolved source-origin and security gates.
 No row below is release-qualified under the new contract.
 
+## Successor Checkpoint
+
+On 2026-10-11, the user paused the old rootboss goal and interrupted its provider turn.
+Team records mark old tasks `job_1281b23c2001K3wVAeCoC7BoPz` and `job_12b73ebb6001DQvTSbDpbnuXBP` cancelled.
+Rootboss's read-only handoff confirmed no remaining writes or hosted builds.
+Architect verified HEAD and remote main at `0dd5c6366d2da9cc874b954bd737e05ac3f497a4` before assigning writers.
+The four unfinished tracing files were preserved and extended, not discarded.
+
+Fresh tasks were admitted as queued, then ran and succeeded:
+
+| Task | Owned Work | Remaining Qualification |
+| --- | --- | --- |
+| `job_12b7942ac0013KCVryuKLE0Kyz` | GNU assembly generation tracing, including retained temporary stdin inputs | Native amd64/arm64 tracing; offset/constant producer replay |
+| `job_12b799012001SwH7cvOzAeBMQP` | New `libgcc.py` constructor and dedicated tests | Native configure replay; generated GCC header proofs; final link integration |
+| `job_12b799014001pIJp3yEz73zBWB` | Read-only security, trust, and public evidence review | Musl High finding, numeric-builtins coverage, current trust evidence, independent release approval |
+
+Coordinator integration adds the optional `libgcc-evidence` build target.
+The default hosted target remains `runtime-trace-evidence`; it does not run or qualify the new libgcc constructor.
+Run `python3 /recipe/libgcc.py` only inside the prepared native `gnu-headers` build stage.
+It consumes pinned source snapshots and verified headers, then writes `gnu-libgcc.json`, build logs, and retained runtime proofs.
+Its receipt always reports `release_qualified=false`.
+Unknown dependencies cause rejection; no fresh runtime artifact is admitted by its name or receipt status alone.
+
+The non-handoff source release path now pushes an exact-SHA tag before verified draft creation.
+A failed tag push prevents release creation and promotion.
+All existing source, scan, signature, public-access, and promotion checks remain required.
+Independent exact-digest quality approval must become an enforced promotion input before delivery.
+
+The active 900-second duty `lop_126866802001b6LaDnpx3wMI67` expires `2026-10-17T15:55:05Z`.
+Its launcher still expects rootboss, but the saved factory coordinator is architect.
+This mismatch can stop scheduled continuation. Duty maintenance and renewal remain required; no duplicate duty was created.
+The frozen Debian security index expires `2026-10-17T19:19:25Z`.
+Current source releases remain blocked; no mutable source tag is authorized by this checkpoint.
+
 ## Conversion Ledger
 
 Implemented first slices now exist for Debian, Ubuntu, and Alpine.

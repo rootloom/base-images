@@ -421,9 +421,29 @@ class SourceReleaseTests(unittest.TestCase):
             manifest = json.loads((Path(tmp) / 'manifest.json').read_text())
             self.assertEqual(manifest['status'], 'blocked')
             calls = [c.args for c in run.call_args_list]
-            self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0][:3], ('gh', 'release', 'create'))
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(calls[0][0], 'git')
+            self.assertIn('push', calls[0])
+            self.assertEqual(calls[0][-1], manifest['source_commit'] + ':refs/tags/' + calls[1][3])
+            self.assertEqual(calls[1][:3], ('gh', 'release', 'create'))
+            self.assertIn('--verify-tag', calls[1])
+            self.assertIn('--draft', calls[1])
+            self.assertEqual(calls[2][:3], ('gh', 'release', 'edit'))
+            self.assertIn('--draft=false', calls[2])
             self.assertFalse((Path(tmp) / 'promotion.json').exists())
+
+    def test_failed_fallback_tag_push_blocks_release_creation(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(source, 'OUT', Path(tmp)), \
+                patch.object(source, 'lockfile', side_effect=ValueError('no lock')), \
+                patch.object(source, 'run', side_effect=RuntimeError('tag push failed')) as run, \
+                patch.object(source, 'verify_public') as verify, patch.object(source, 'promote_source') as promote:
+            with self.assertRaisesRegex(RuntimeError, 'tag push failed'):
+                source.publish()
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0], 'git')
+            self.assertIn('push', run.call_args.args)
+            verify.assert_not_called()
+            promote.assert_not_called()
 
     def test_sbom_retains_identifiers_and_licenses(self):
         lock, _ = self.evidence()

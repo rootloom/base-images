@@ -27,6 +27,29 @@ with patch.dict(sys.modules, {"compiler": compiler}):
 
 
 class SourceOrigins(unittest.TestCase):
+    def test_gnu_assembly_generation_has_separate_records(self):
+        arguments = ["-c", "-S", "-pipe", "-o", "/build/generated.S", "/source/input.c",
+                     "-Wp,-MD,/build/generated.S.d", "-MF", "/build/generated.S.dt"]
+        with patch.object(trace.subprocess, "run") as run, patch.object(Path, "mkdir"), \
+                patch.object(Path, "read_bytes", return_value=b"retained bytes"), \
+                patch.object(Path, "read_text", return_value="object: /source/input.c\n"), \
+                patch.object(Path, "write_bytes") as write, patch.object(Path, "write_text") as record, \
+                patch.object(trace.compiler, "digest", return_value="a" * 64), \
+                patch.object(trace.compiler, "main") as compile_object:
+            trace.main(arguments)
+        compile_object.assert_not_called()
+        command = run.call_args.args[0]
+        self.assertNotIn("-pipe", command)
+        self.assertNotIn("-Wp,-MD,/build/generated.S.d", command)
+        self.assertEqual(command[-3:-1], ["-MD", "-MF"])
+        self.assertIn("/evidence/sources/generation/", command[-1])
+        self.assertFalse(any(item.startswith("-Wl,-Map") for item in command))
+        value = json.loads(record.call_args.args[0])
+        self.assertNotIn("object", value)
+        self.assertEqual(value["output"], "/build/generated.S")
+        self.assertEqual(value["inputs"], [{"path": "/source/input.c", "sha256": "a" * 64}])
+        self.assertEqual(write.call_count, 4)
+
     def test_gnu_vendor_link_map_is_preserved_and_copied(self):
         arguments = ["-r", "-o", "/build/partial.o", "-Wl,-Map,/build/vendor.mapT"]
         with patch.object(trace.compiler, "main") as run, patch.object(Path, "mkdir"), \
@@ -66,7 +89,7 @@ class SourceOrigins(unittest.TestCase):
 
     def test_gnu_compile_trace_does_not_add_link_map(self):
         for arguments in (["-c", "-o", "/build/object.o"], ["-E", "-o", "/build/preprocessed.i"],
-                          ["-S", "-o", "/build/assembly.s"], ["-o", "/tmp/bootstrap-test"]):
+                          ["-o", "/tmp/bootstrap-test"]):
             with self.subTest(arguments=arguments), patch.object(trace.compiler, "main") as run:
                 trace.main(arguments)
                 run.assert_called_once_with(arguments)

@@ -746,8 +746,11 @@ def publish():
                 run('gh', 'release', 'delete-asset', tag, asset['name'], '--repo', repo, '--yes')
         run('gh', 'release', 'edit', tag, '--repo', repo, '--draft=false', '--latest=false', '--notes', notes)
     else:
+        run('git', '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential',
+            'push', 'https://github.com/' + repo + '.git', manifest['source_commit'] + ':refs/tags/' + tag)
         run('gh', 'release', 'create', tag, '--repo', repo, '--target', manifest['source_commit'], '--title', tag,
-            '--notes', notes, '--latest=false', *[str(p) for p in assets])
+            '--verify-tag', '--draft', '--notes', notes, '--latest=false', *[str(p) for p in assets])
+        run('gh', 'release', 'edit', tag, '--repo', repo, '--draft=false', '--latest=false')
     for path in assets:
         verify_public(repo, tag, path)
     if manifest['status'] != 'passed':

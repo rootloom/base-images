@@ -4,6 +4,7 @@ import hashlib
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import importlib.util
+import io
 import json
 import lzma
 import os
@@ -29,6 +30,92 @@ with patch.dict(sys.modules, {"bootstrap": BOOTSTRAP}):
 
 
 class GnuBootstrapTests(unittest.TestCase):
+    def test_temporary_stdin_generation_retains_bytes_and_vendor_dependencies(self):
+        from test_source_origins import trace
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            evidence = root / "generation"
+            output = root / "test.s"
+            header = root / "source.h"
+            header.write_bytes(b"#define VALUE 7\n")
+            vendor = root / "vendor.d"
+            explicit = root / "vendor.dt"
+            joined = root / "vendor-joined.dt"
+            args = ["-S", "-o", str(output), "-x", "c", "-", "-pipe",
+                    "-Wp,-MD," + str(vendor), "-MF", str(explicit), "-MF" + str(joined)]
+
+            def compile_probe(command, **options):
+                self.assertEqual(command.count("-MF"), 1)
+                self.assertNotIn("-pipe", command)
+                self.assertNotIn(str(explicit), command)
+                self.assertNotIn("-MF" + str(joined), command)
+                self.assertEqual(options["input"], data)
+                self.assertIs(options["check"], True)
+                output.write_bytes(b"/* @@@name@@@VALUE@@@value@@@7@@@end@@@ */\n")
+                Path(command[-1]).write_text("test.s: " + str(header) + "\n")
+
+            with patch.object(trace, "GENERATIONS", evidence), \
+                    patch.object(trace, "GENERATION_ROOTS", (root,)), \
+                    patch.object(trace.subprocess, "run", side_effect=compile_probe), \
+                    patch.object(trace.compiler, "main") as objects, patch.object(trace.sys, "stdin") as stream:
+                for data in (b"void dummy(void) { /* first */ }\n", b"void dummy(void) { /* second */ }\n",
+                             b"void dummy(void) { /* second */ }\n"):
+                    stream.buffer = io.BytesIO(data)
+                    trace.main(args)
+                objects.assert_not_called()
+            records = list(evidence.glob("*.json"))
+            self.assertEqual(len(records), 3)
+            for path in records:
+                record = json.loads(path.read_text())
+                self.assertNotIn("object", record)
+                self.assertEqual(record["output"], str(output))
+                self.assertEqual(record["output_sha256"], record["assembly_sha256"])
+                self.assertEqual(record["inputs"][0]["path"], "<stdin>")
+                self.assertEqual(record["inputs"][1]["path"], str(header))
+                for item in record["inputs"]:
+                    retained = evidence / "inputs" / item["sha256"]
+                    self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(), item["sha256"])
+                for field in ("dependencies", "assembly"):
+                    self.assertEqual(hashlib.sha256((evidence / record[field]).read_bytes()).hexdigest(),
+                                     record[field + "_sha256"])
+                for destination in (vendor, explicit, joined):
+                    self.assertEqual(destination.read_bytes(), (evidence / record["dependencies"]).read_bytes())
+
+    def test_generation_rejects_response_files_and_assembler_imports(self):
+        from test_source_origins import trace
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "test.s"
+            args = ["-S", "-o", str(output), "source.c"]
+            with patch.object(trace, "GENERATIONS", root / "generation"), \
+                    patch.object(trace, "GENERATION_ROOTS", (root,)), \
+                    patch.object(trace.subprocess, "run") as run:
+                with self.assertRaisesRegex(ValueError, "response file"):
+                    trace.main([*args, "@unreviewed"])
+                run.assert_not_called()
+                output.write_text('.incbin "unreviewed"\n')
+                with self.assertRaisesRegex(ValueError, "Assembler file imports"):
+                    trace.main(args)
+                self.assertFalse(list((root / "generation").glob("*.json")))
+
+    def test_generation_resolved_output_cannot_escape_traced_root(self):
+        from test_source_origins import trace
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            allowed = root / "allowed"
+            allowed.mkdir()
+            (allowed / "escape").symlink_to(root, target_is_directory=True)
+            args = ["-S", "-o", str(allowed / "escape/test.s"), "source.c"]
+            with patch.object(trace, "GENERATION_ROOTS", (allowed,)), \
+                    patch.object(trace.compiler, "main") as fallback, \
+                    patch.object(trace.subprocess, "run") as run:
+                trace.main(args)
+                fallback.assert_called_once_with(args)
+                run.assert_not_called()
+
     def runtime_sources(self, root, evidence, machine):
         snapshot = json.loads((evidence / "glibc.source-files.json").read_text())
         sysdirs = ["sysdeps/x86_64/64", "sysdeps/x86"] if machine == "x86_64" else ["sysdeps/aarch64"]
@@ -150,6 +237,27 @@ class GnuBootstrapTests(unittest.TestCase):
         self.assertEqual(record["header_audit_sha256"], hashlib.sha256((evidence / "gnu-headers.json").read_bytes()).hexdigest())
         self.assertRegex(record["libc_sha256"], r"^[a-f0-9]{64}$")
         self.assertTrue(record["link_maps"])
+        self.assertGreaterEqual(len(record["generation_records"]), 4)
+        generations = evidence / "sources/generation"
+        outputs = set()
+        for name, digest in record["generation_records"].items():
+            path = generations / name
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+            generation = json.loads(path.read_text())
+            self.assertNotIn("object", generation)
+            self.assertIn("-S", generation["command"])
+            outputs.add(generation["output"])
+            self.assertEqual(generation["output_sha256"], generation["assembly_sha256"])
+            for field in ("dependencies", "assembly"):
+                self.assertEqual(hashlib.sha256((generations / generation[field]).read_bytes()).hexdigest(),
+                                 generation[field + "_sha256"])
+            self.assertTrue(generation["inputs"])
+            for source in generation["inputs"]:
+                self.assertEqual(hashlib.sha256((generations / "inputs" / source["sha256"]).read_bytes()).hexdigest(),
+                                 source["sha256"])
+        expected = {"/build/glibc-runtime/stdio-common/" + name for name in (
+            "errlist-data-aux-shared.S", "errlist-data-aux.S", "siglist-aux-shared.S", "siglist-aux.S")}
+        self.assertTrue(expected.issubset(outputs))
         for name, digest in record["link_maps"].items():
             self.assertEqual(Path(name).name, name)
             self.assertEqual(hashlib.sha256((evidence / "sources/link-maps" / name).read_bytes()).hexdigest(), digest)
