@@ -176,6 +176,40 @@ These tests repair preflight but do not qualify current native closure or any re
 env PYTHONDONTWRITEBYTECODE=1 GNU_BOOTSTRAP_INPUTS=evidence/gnu-hosted-inputs python3 -m unittest discover -s tests -p test_gnu_bootstrap.py -q
 ```
 
+### Retained Native Generation Qualification
+
+Architect downloaded both artifacts from GNU run `38150642642` at exact commit `22d6315`.
+Archive checksums matched GitHub's artifact digests before extraction.
+Archive path and symlink checks passed. Existing evidence remained unchanged.
+
+| Architecture | Artifact ID | Archive SHA-256 | Unknown Inputs | Generation Records | Admitted Constants |
+| --- | --- | --- | --- | --- | --- |
+| amd64 | `11707463054` | `51b32ef28cfca8a6f17ce644f764d742fb5fa43ac7afeb9f09a1cf3f699b416e` | 28 | 19 | 0 |
+| arm64 | `11707153230` | `1958954b0a30e121fe7d01e2cafccd84e2d805ebc67391d5b8a865d81eecbca2` | 21 | 13 | 0 |
+
+Local archives are `evidence/gnu-hosted-38150642642-<arch>.zip`.
+Extracted receipts and bytes are under `evidence/gnu-hosted-38150642642-<arch>/`.
+Both receipts report completed construction and `release_qualified=false`.
+The current scoped suite discovers 19 tests per retained architecture: 16 pass, 2 skip, and 1 errors.
+The required constant-proof check rejects both with `Missing actual constant producer`.
+This is a confirmed native qualification gap, not another import failure.
+
+Every retained constant generation consumes unproved `config.h` and `libc-modules.h`.
+Some also consume `abi-versions.h` or `libc-abis.h`.
+The next source-closure assignments must prove configure probes and those source-rule producers first.
+Replay cannot admit a constant while any contributing generated dependency remains unproved.
+Bootstrap-stage `libgcc.a` still appears in retained final link maps and lacks final runtime admission.
+
+For each architecture, run the scoped suite with these variables set to the retained directory:
+`GNU_BOOTSTRAP_EVIDENCE`, `GNU_COMPILER_EVIDENCE`, `GNU_HEADER_EVIDENCE`, and `GNU_RUNTIME_TRACE_EVIDENCE`.
+Set `GNU_BOOTSTRAP_INPUTS=evidence/gnu-hosted-inputs` and keep `PYTHONDONTWRITEBYTECODE=1`.
+Use `python3 -m unittest discover -s tests -p test_gnu_bootstrap.py -q` from the repository directory.
+Do not report the expected rejection, skipped checks, or construction success as release qualification.
+
+The preflight repair is pushed as `4dfc21eea0094869afe39e1fee09a73c34ea93d5`.
+Its automatic GNU run `38153282130` passed source preflight and entered native compilation.
+No manual or duplicate dispatch occurred. Inspect existing runs before starting any new build.
+
 ## Conversion Ledger
 
 Implemented first slices now exist for Debian, Ubuntu, and Alpine.
