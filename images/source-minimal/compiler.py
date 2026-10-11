@@ -21,6 +21,11 @@ def reject_assembler_imports(text):
         raise ValueError("Assembler file imports are not allowed")
 
 
+def dependency_inputs(text):
+    rule = text.replace("\\\n", " ").splitlines()[0]
+    return [Path(name).resolve() for name in shlex.split(rule.split(":", 1)[1])]
+
+
 def link_scripts(args):
     tokens = []
     for arg in args:
@@ -85,7 +90,7 @@ def main(args):
     text = dependency.read_text().replace("\\\n", " ")
     for destination in build_dependencies:
         Path(destination).write_bytes(dependency.read_bytes())
-    inputs = [Path(name).resolve() for name in shlex.split(text.split(":", 1)[1])]
+    inputs = dependency_inputs(text)
     if not inputs:
         raise ValueError("Empty compiler dependency record")
     record = {

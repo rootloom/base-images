@@ -26,6 +26,10 @@ with patch.dict(sys.modules, {"compiler": compiler}):
 
 
 class SourceOrigins(unittest.TestCase):
+    def test_dependency_phony_targets_are_not_compiler_inputs(self):
+        text = "object.o: /source.c \\\n /header.h\n/header.h:\n"
+        self.assertEqual(compiler.dependency_inputs(text), [Path("/source.c"), Path("/header.h")])
+
     def test_gnu_link_trace_adds_distinct_maps(self):
         with patch.object(trace.compiler, "main") as run, patch.object(Path, "mkdir"):
             trace.main(["-o", "/build/libc.so", "object.o"])
