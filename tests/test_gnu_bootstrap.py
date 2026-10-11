@@ -30,6 +30,125 @@ with patch.dict(sys.modules, {"bootstrap": BOOTSTRAP}):
 
 
 class GnuBootstrapTests(unittest.TestCase):
+    def constant_runtime(self):
+        from test_source_origins import headers, origins
+
+        spec = importlib.util.spec_from_file_location("gnu_runtime", ROOT / "images/debian-slim/runtime.py")
+        runtime = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {"headers": headers, "origins": origins}):
+            spec.loader.exec_module(runtime)
+        return runtime
+
+    def test_constant_replay_requires_verified_scripts_symbols_and_stdin(self):
+        runtime = self.constant_runtime()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "scripts").mkdir()
+            retained = root / "retained"
+            retained.mkdir()
+            symbol = root / "offsets.sym"
+            symbol.write_bytes(b"offset\n")
+            extract = root / "scripts/glibcextract.py"
+            extract.write_text("import subprocess\nimport tempfile\nfrom pathlib import Path\n"
+                "def compute():\n"
+                "    with tempfile.TemporaryDirectory() as d:\n"
+                "        c, s = Path(d) / 'test.c', Path(d) / 'test.s'\n"
+                "        c.write_bytes(b'verified stdin')\n"
+                "        subprocess.check_call(f'replay -S -o {s} -x c - < {c}', shell=True)\n"
+                "        return s.read_text()\n")
+            script = root / "scripts/gen-as-const.py"
+            script.write_text("import glibcextract\nimport sys\nfrom pathlib import Path\n"
+                "def main():\n"
+                "    if Path(sys.argv[-1]).read_bytes() != b'offset\\n':\n"
+                "        raise ValueError('unknown symbol')\n"
+                "    print(glibcextract.compute(), end='')\n")
+            index = {str(path): {"component": "glibc", "sha256": runtime.sha256(path)}
+                     for path in (symbol, script, extract)}
+            assembly = b"#define offset 7\n"
+            producer = runtime.replay_constants(root, symbol, b"verified stdin", assembly, index, retained)
+            self.assertEqual(producer["sha256"], hashlib.sha256(assembly).hexdigest())
+            self.assertEqual(len(producer["inputs"]), 3)
+            generations = root / "generation"
+            (generations / "inputs").mkdir(parents=True)
+            header = root / "source.h"
+            header.write_bytes(b"verified dependency")
+            index[str(header)] = {"component": "glibc", "sha256": runtime.sha256(header)}
+            stdin_digest = hashlib.sha256(b"verified stdin").hexdigest()
+            (generations / "inputs" / stdin_digest).write_bytes(b"verified stdin")
+            (generations / "inputs" / runtime.sha256(header)).write_bytes(header.read_bytes())
+            (generations / "probe.s").write_bytes(assembly)
+            (generations / "probe.d").write_text("test.s: " + str(header) + "\n")
+            record = {"inputs": [{"path": "<stdin>", "sha256": stdin_digest},
+                                  {"path": str(header), "sha256": runtime.sha256(header)}],
+                      "assembly": "probe.s", "assembly_sha256": runtime.sha256(generations / "probe.s"),
+                      "dependencies": "probe.d", "dependencies_sha256": runtime.sha256(generations / "probe.d")}
+            (generations / "probe.json").write_text(json.dumps(record))
+            producers = runtime.constant_inputs(root, index, retained, generations, {}, root)
+            proof = producers[producer["sha256"]]
+            self.assertEqual(proof["generation_record_sha256"], runtime.sha256(generations / "probe.json"))
+            self.assertEqual(proof["generation_inputs"][0]["sha256"], runtime.sha256(header))
+            unknown_digest = hashlib.sha256(b"unknown producer stdin").hexdigest()
+            (generations / "inputs" / unknown_digest).write_bytes(b"unknown producer stdin")
+            record["inputs"][0]["sha256"] = unknown_digest
+            (generations / "probe.json").write_text(json.dumps(record))
+            self.assertEqual(runtime.constant_inputs(root, index, retained, generations, {}, root), {})
+            (generations / "probe.s").write_bytes(b"changed assembly")
+            with self.assertRaisesRegex(ValueError, "evidence changed"):
+                runtime.constant_inputs(root, index, retained, generations, {}, root)
+            with self.assertRaisesRegex(ValueError, "stdin mismatch"):
+                runtime.replay_constants(root, symbol, b"unknown stdin", assembly, index, retained)
+            for path in (symbol, script, extract):
+                data = path.read_bytes()
+                path.write_bytes(data + b"# changed\n")
+                with self.assertRaises(ValueError):
+                    runtime.replay_constants(root, symbol, b"verified stdin", assembly, index, retained)
+                path.write_bytes(data)
+
+    def test_unknown_constant_dependency_has_no_producer_admission(self):
+        runtime = self.constant_runtime()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            generations = root / "generation"
+            (generations / "inputs").mkdir(parents=True)
+            data = b"unknown dependency"
+            digest = hashlib.sha256(data).hexdigest()
+            (generations / "inputs" / digest).write_bytes(data)
+            for name in ("probe.s", "probe.d"):
+                (generations / name).write_bytes(data)
+            record = {"inputs": [{"path": "<stdin>", "sha256": digest},
+                                  {"path": str(root / "unknown.h"), "sha256": digest}],
+                      "assembly": "probe.s", "assembly_sha256": digest,
+                      "dependencies": "probe.d", "dependencies_sha256": digest}
+            (generations / "probe.json").write_text(json.dumps(record))
+            with patch.object(runtime, "replay_constants") as replay:
+                self.assertEqual(runtime.constant_inputs(root, {}, root, generations, {}, root), {})
+                replay.assert_not_called()
+
+    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS"), "Real GNU source inputs are required")
+    def test_vendor_constant_scripts_replay_exact_stdin_and_assembly(self):
+        runtime = self.constant_runtime()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "scripts").mkdir()
+            retained = root / "retained"
+            retained.mkdir()
+            paths = [root / "scripts/gen-as-const.py", root / "scripts/glibcextract.py"]
+            with tarfile.open(Path(os.environ["GNU_BOOTSTRAP_INPUTS"]) / "glibc_2.41.orig.tar.xz") as archive:
+                for path in paths:
+                    path.write_bytes(archive.extractfile("glibc-2.41/" + str(path.relative_to(root))).read())
+            symbol = root / "constants.sym"
+            symbol.write_text("#define VALUE 7\nVALUE\n")
+            index = {str(path): {"component": "glibc", "sha256": runtime.sha256(path)}
+                     for path in [*paths, symbol]}
+            stdin = (b"#define VALUE 7\nvoid\ndummy (void)\n{\n"
+                     b'asm ("/* @@@name@@@VALUE@@@value@@@%0@@@end@@@ */" '
+                     b': : "i" ((long int) (VALUE)));\n}\n')
+            assembly = b"/* @@@name@@@VALUE@@@value@@@$7@@@end@@@ */\n"
+            producer = runtime.replay_constants(root, symbol, stdin, assembly, index, retained)
+            self.assertEqual(producer["sha256"], hashlib.sha256(b"#define VALUE 7\n").hexdigest())
+            with self.assertRaisesRegex(ValueError, "stdin mismatch"):
+                runtime.replay_constants(root, symbol, stdin + b"changed", assembly, index, retained)
+
     def test_temporary_stdin_generation_retains_bytes_and_vendor_dependencies(self):
         from test_source_origins import trace
 
@@ -272,8 +391,14 @@ class GnuBootstrapTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((evidence / "sources/trace-inputs" / producer["sha256"]).read_bytes()).hexdigest(),
                              producer["sha256"])
             retained = evidence / "runtime-inputs"
-            self.assertEqual(hashlib.sha256((retained / producer["recipe_sha256"]).read_bytes()).hexdigest(),
-                             producer["recipe_sha256"])
+            if producer.get("replay") == "verified-stdin-retained-assembly":
+                generation = evidence / "sources/generation" / producer["generation_record"]
+                self.assertEqual(hashlib.sha256(generation.read_bytes()).hexdigest(),
+                                 producer["generation_record_sha256"])
+                self.assertTrue(producer["generation_inputs"])
+            else:
+                self.assertEqual(hashlib.sha256((retained / producer["recipe_sha256"]).read_bytes()).hexdigest(),
+                                 producer["recipe_sha256"])
             for source in producer["inputs"]:
                 self.assertEqual(source_files[source["path"]],
                                  {"component": source["component"], "sha256": source["sha256"]})

@@ -454,7 +454,21 @@ class SourceReleaseTests(unittest.TestCase):
             self.assertEqual(record['purl'], expected['purl'])
             self.assertEqual(record['licenses'][0]['license']['id'], expected['license'])
 
-    def test_signatures_and_anonymous_access_precede_mutable_tags(self):
+    def test_independent_approval_blocks_all_promotion_operations(self):
+        _, manifest, _ = self.refresh()
+        manifest['quality_approval'] = {'decision': 'approved', 'index_digest': DIGEST}
+        with patch.object(source, 'anonymous') as anonymous, patch.object(source, 'run') as run, \
+                patch.object(source, 'inspect') as inspect, patch.object(source, 'verify_public') as public:
+            with self.assertRaisesRegex(ValueError, 'Authenticated independent exact-digest quality approval'):
+                source.promote_source(manifest, 'rootloom/base-images', 'source-source-minimal-1-1')
+            anonymous.assert_not_called()
+            run.assert_not_called()
+            inspect.assert_not_called()
+            public.assert_not_called()
+
+    @patch.object(source, 'require_independent_quality_approval')
+    def test_signatures_and_anonymous_access_precede_mutable_tags(self, approval):
+        # Test downstream controls separately; production approval remains blocked.
         _, manifest, _ = self.refresh()
         with tempfile.TemporaryDirectory() as tmp, patch.object(source, 'OUT', Path(tmp)), patch.object(source, 'anonymous') as anonymous, patch.object(source, 'run') as run, patch.object(source, 'inspect', return_value=(DIGEST, {})), patch.object(source, 'verify_public'):
             source.write_json(Path(tmp) / 'manifest.json', manifest)

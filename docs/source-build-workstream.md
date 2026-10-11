@@ -48,6 +48,53 @@ This mismatch can stop scheduled continuation. Duty maintenance and renewal rema
 The frozen Debian security index expires `2026-10-17T19:19:25Z`.
 Current source releases remain blocked; no mutable source tag is authorized by this checkpoint.
 
+### Bounded Successor Continuation
+
+Architect resumed in task `job_12b781517002zzp6aOMkX1BGeG` after independently checking current Team ownership.
+The prior integration task had succeeded. Both old rootboss tasks remained cancelled.
+Checkout and live remote main matched `5dc596ad1c52b524fa1908b84deec62a022d5787`, with a clean worktree.
+All four original unfinished files remain preserved in that commit.
+
+Three fresh tasks were admitted and succeeded:
+
+| Task | Result | Next Owner And Action |
+| --- | --- | --- |
+| `job_12b81d842001oSA4XwkhmmToJk` | Verified-source glibc constant-script replay against retained stdin and assembly | `@linux`: qualify actual constant-header proofs on native amd64 and arm64; close remaining generated inputs |
+| `job_12b823b20001v1Fy1hNuThtesX` | Byte-bound libgcc generated-header replay, with `admitted=false` | `@compiled`: run the existing `libgcc-evidence` target natively; prove configure probes and compiler headers |
+| `job_12b823b24001EECXI1zueMIdoo` | Read-only approval, security, and trust review | `@release`: implement authenticated independent exact-digest quality approval |
+
+Coordinator added an unconditional independent-approval guard before all source promotion operations.
+Unsigned approval fields and builder quality results cannot authorize signing or mutable tags.
+Blocked evidence publication remains available. There is no production bypass for this guard.
+The authenticated approval workflow and validator remain unfinished.
+Approval must bind independent workflow identity, exact commit/run/attempt, index/platform digests, and all qualified evidence hashes.
+
+Local acceptance: 172 tests discovered, 151 passed, 21 skipped.
+The source-release suite passed 31 tests; libgcc passed 20 tests; source-origins passed 34 tests.
+Verified upstream constant scripts also passed one separate fixture replay test using retained GNU source inputs.
+The fixture uses synthetic symbols and assembly. It is not native constant-header qualification.
+`git diff --check` passed. No heavy local build, dependency installation, or host setting change occurred.
+
+At integration, GNU run `38149889385` and source run `38149889442` remained active at `5dc596a`.
+Their evidence does not contain this successor change. No manual or duplicate dispatch occurred.
+After the normal push, inspect push-triggered runs before any source-only dispatch.
+Default GNU CI qualifies construction evidence only; it still does not build the optional libgcc target.
+`@quality` task `job_12b781517003xliEFSCOp58bFJ` owns the independent exact-commit review after this task settles.
+
+Reusable verification from the repository directory:
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -q
+env PYTHONDONTWRITEBYTECODE=1 GNU_BOOTSTRAP_INPUTS=evidence/gnu-hosted-inputs PYTHONPATH=tests python3 -m unittest test_gnu_bootstrap.GnuBootstrapTests.test_vendor_constant_scripts_replay_exact_stdin_and_assembly -v
+git diff --check
+```
+
+Unknown inputs and bootstrap `crtbegin`, `crtend`, and libgcc still block final GNU admission.
+The explicit GNU final-link policy, native repeatability, musl High finding, and maintained numeric-builtins advisory coverage remain unfinished.
+All six genuine distribution/source image releases remain unfinished. No FIPS or full compiler-bootstrap claim is made.
+The existing duty remains active at 900 seconds, with its coordinator mismatch and October 17 expiry unchanged.
+Authorized duty repair and renewal are still needed before `2026-10-17T15:55:05Z`; no duplicate duty was created.
+
 ## Conversion Ledger
 
 Implemented first slices now exist for Debian, Ubuntu, and Alpine.

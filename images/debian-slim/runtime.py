@@ -1,13 +1,118 @@
 """Trace a fresh GNU libc build without admitting it to a release."""
 
 import json
+import contextlib
+import io
+import hashlib
 import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+import types
 
 from headers import make_header
 from origins import input_origin, sha256
+
+
+def replay_constants(libc, symbol, stdin, assembly, source_files, retained):
+    inputs = [libc / "scripts/gen-as-const.py", libc / "scripts/glibcextract.py", symbol]
+    references = []
+    for path in inputs:
+        source = source_files.get(str(path.resolve()))
+        if not source or source["sha256"] != sha256(path) or source["component"] != "glibc":
+            raise ValueError("Unverified constant producer")
+        digest = sha256(path)
+        (retained / digest).write_bytes(path.read_bytes())
+        references.append({"path": str(path), "component": "glibc", "sha256": digest})
+    extract = types.ModuleType("glibcextract")
+    exec(compile(inputs[1].read_bytes(), str(inputs[1]), "exec"), extract.__dict__)
+
+    def compile_probe(command, shell):
+        # The verified script must reproduce stdin before it can consume assembly.
+        match = re.fullmatch(r"replay -S -o (\S+) -x c - < (\S+)", command)
+        if not shell or not match or Path(match[2]).read_bytes() != stdin:
+            raise ValueError("Constant producer stdin mismatch")
+        Path(match[1]).write_bytes(assembly)
+
+    extract.subprocess = types.SimpleNamespace(check_call=compile_probe)
+    previous = sys.modules.get("glibcextract")
+    argv = sys.argv
+    try:
+        sys.modules["glibcextract"] = extract
+        producer = types.ModuleType("gen_as_const")
+        exec(compile(inputs[0].read_bytes(), str(inputs[0]), "exec"), producer.__dict__)
+        sys.argv = [str(inputs[0]), "--cc", "replay", str(symbol)]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            producer.main()
+    finally:
+        sys.argv = argv
+        if previous is None:
+            sys.modules.pop("glibcextract", None)
+        else:
+            sys.modules["glibcextract"] = previous
+    data = output.getvalue().encode()
+    if not data:
+        raise ValueError("Empty constant producer output")
+    digest = hashlib.sha256(data).hexdigest()
+    return {"sha256": digest, "inputs": references,
+            "command": ["python3", str(inputs[0]), "--cc", "retained-assembly-replay", str(symbol)],
+            "replay": "verified-stdin-retained-assembly"}
+
+
+def constant_inputs(libc, source_files, retained, generations, generated, work):
+    symbols = [Path(name) for name in source_files
+               if Path(name).is_relative_to(libc) and Path(name).suffix == ".sym"]
+    result = {}
+    for record_path in sorted(generations.glob("*.json")):
+        record = json.loads(record_path.read_text())
+        stdin = [item for item in record["inputs"] if item["path"] == "<stdin>"]
+        if len(stdin) != 1:
+            continue
+        for field in ("assembly", "dependencies"):
+            name = record[field]
+            if Path(name).name != name or sha256(generations / name) != record[field + "_sha256"]:
+                raise ValueError("Constant generation evidence changed")
+        dependencies = []
+        for item in record["inputs"]:
+            path = generations / "inputs" / item["sha256"]
+            if sha256(path) != item["sha256"]:
+                raise ValueError("Retained constant input changed")
+            if item["path"] == "<stdin>":
+                continue
+            try:
+                source = source_files.get(str(Path(item["path"]).resolve()))
+                if not source or source["sha256"] != item["sha256"]:
+                    raise ValueError("Unverified constant dependency")
+                component = input_origin(item["path"], source_files)
+                if sha256(item["path"]) != item["sha256"]:
+                    raise ValueError("Constant dependency changed")
+                dependencies.append({**item, "component": component})
+            except ValueError:
+                path = Path(item["path"])
+                relative = str(path.relative_to(work)) if path.is_relative_to(work) else None
+                producer = generated.get(relative)
+                if not producer or producer["sha256"] != item["sha256"]:
+                    break
+                dependencies.append({**item, "producer": producer})
+        else:
+            if not dependencies:
+                continue
+            for symbol in symbols:
+                try:
+                    producer = replay_constants(libc, symbol,
+                        (generations / "inputs" / stdin[0]["sha256"]).read_bytes(),
+                        (generations / record["assembly"]).read_bytes(), source_files, retained)
+                except ValueError as error:
+                    if str(error) == "Constant producer stdin mismatch":
+                        continue
+                    raise
+                producer.update({"generation_record": record_path.name,
+                                 "generation_record_sha256": sha256(record_path),
+                                 "generation_inputs": dependencies, "stdin_sha256": stdin[0]["sha256"]})
+                result[producer["sha256"]] = producer
+    return result
 
 
 def loader_input(libc, source_files, retained):
@@ -131,6 +236,8 @@ def main():
     producer_inputs = evidence / "runtime-inputs"
     producer_inputs.mkdir()
     generated = generated_inputs(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs, os.uname().machine)
+    constants = constant_inputs(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs,
+                                evidence / "sources/generation", generated, work)
     verified_inputs = {}
     for record in records:
         for item in record["inputs"]:
@@ -141,7 +248,7 @@ def main():
                 input_origin(item["path"], source_files)
             except ValueError:
                 relative = str(Path(item["path"]).relative_to(work)) if Path(item["path"]).is_relative_to(work) else None
-                producer = generated.get(relative)
+                producer = generated.get(relative) or constants.get(item["sha256"])
                 if producer:
                     if producer["sha256"] != item["sha256"]:
                         raise ValueError("Runtime input differs from its source producer: " + item["path"])

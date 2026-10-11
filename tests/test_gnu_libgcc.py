@@ -118,6 +118,97 @@ class LibgccTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
             self.inspect()
 
+    def generated_fixture(self):
+        source = self.root / "libgcc"
+        source.mkdir()
+        for name in ("configure", "config.host", "config.in", "Makefile.in"):
+            (source / name).write_text("pinned source\n")
+        (source / "mkheader.sh").write_text('printf "%s\\n" "$DEFINES" "$HEADERS"\n')
+        for path in source.iterdir():
+            self.index[str(path)] = {"component": "gcc", "sha256": LIBGCC.sha256(path)}
+        (self.work / "Makefile").write_text("libgcc_tm_defines = HAVE_TEST=1\nlibgcc_tm_file = test.h\n")
+        (self.work / "config.status").write_text('printf "configured header\\n" > auto-target.h\n')
+        (self.work / "libgcc_tm.h").write_text("HAVE_TEST=1\ntest.h\n")
+        (self.work / "auto-target.h").write_text("configured header\n")
+        return source
+
+    def replay(self, source):
+        return LIBGCC.replay_generated_headers(self.work, source, self.index, self.retained, {})
+
+    def test_generated_replay_retains_bytes_without_admission(self):
+        source = self.generated_fixture()
+        before = dict(self.index)
+        proofs = self.replay(source)
+        self.assertEqual(len(proofs), 2)
+        self.assertEqual(self.index, before)
+        for proof in proofs:
+            self.assertTrue(proof["replay_verified"])
+            self.assertFalse(proof["admitted"])
+            self.assertEqual(LIBGCC.sha256(proof["retained"]), proof["sha256"])
+            self.assertEqual(len(proof["inputs"]), 7)
+            for item in proof["inputs"]:
+                self.assertEqual(LIBGCC.sha256(item["retained"]), item["sha256"])
+
+    def test_generated_replay_rejects_unknown_producer(self):
+        source = self.generated_fixture()
+        del self.index[str(source / "mkheader.sh")]
+        with self.assertRaisesRegex(ValueError, "Unknown generated-header producer"):
+            self.replay(source)
+
+    def test_generated_replay_does_not_authorize_runtime_dependency(self):
+        source = self.generated_fixture()
+        self.replay(source)
+        path = self.records / "member.o.json"
+        record = json.loads(path.read_text())
+        header = self.work / "auto-target.h"
+        record["inputs"].append({"path": str(header), "sha256": LIBGCC.sha256(header)})
+        path.write_text(json.dumps(record))
+        with self.assertRaisesRegex(ValueError, "Unknown runtime input"):
+            self.inspect()
+
+    def test_generated_replay_rejects_changed_input_during_replay(self):
+        source = self.generated_fixture()
+
+        def change_producer(*args, **kwargs):
+            (source / "config.host").write_text("changed while replaying\n")
+            return (self.work / "libgcc_tm.h").read_bytes()
+
+        with patch.object(LIBGCC.subprocess, "check_output", side_effect=change_producer):
+            with self.assertRaisesRegex(ValueError, "producer changed during replay"):
+                self.replay(source)
+
+    def test_generated_replay_rejects_changed_producer(self):
+        source = self.generated_fixture()
+        (source / "mkheader.sh").write_text("exit 0\n")
+        with self.assertRaisesRegex(ValueError, "Unknown generated-header producer"):
+            self.replay(source)
+
+    def test_generated_replay_rejects_make_expansion(self):
+        source = self.generated_fixture()
+        (self.work / "Makefile").write_text("libgcc_tm_defines = $(UNKNOWN)\nlibgcc_tm_file = test.h\n")
+        with self.assertRaisesRegex(ValueError, "Unknown generated-header parameter"):
+            self.replay(source)
+
+    def test_generated_replay_rejects_mismatched_target_header(self):
+        source = self.generated_fixture()
+        (self.work / "auto-target.h").write_text("bootstrap header\n")
+        with self.assertRaisesRegex(ValueError, "differs from replay: auto-target.h"):
+            self.replay(source)
+
+    def test_generated_replay_rejects_mismatched_tm_header(self):
+        source = self.generated_fixture()
+        (self.work / "libgcc_tm.h").write_text("bootstrap header\n")
+        with self.assertRaisesRegex(ValueError, "differs from replay: libgcc_tm.h"):
+            self.replay(source)
+
+    def test_generated_replay_rejects_bootstrap_config_status_symlink(self):
+        source = self.generated_fixture()
+        original = self.root / "bootstrap-config.status"
+        (self.work / "config.status").rename(original)
+        (self.work / "config.status").symlink_to(original)
+        with self.assertRaisesRegex(ValueError, "Missing fresh configure output"):
+            self.replay(source)
+
     def test_header_source_references_and_retained_bytes(self):
         evidence = self.root / "evidence"
         evidence.mkdir()

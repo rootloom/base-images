@@ -37,6 +37,13 @@ Resolve dependencies separately for `amd64` and `arm64`, including architecture 
 Reject missing inputs, unresolved dependency cycles, unexpected ELF dependencies, and unrecorded files.
 Retain native tests, normalized repeat-rootfs checks, complete vulnerability coverage, and signed promotion gates.
 
+GNU construction now retains temporary compiler generation inputs and can replay glibc constant scripts against exact retained stdin and assembly.
+Fresh libgcc construction records byte-bound `libgcc_tm.h` and `auto-target.h` replay evidence, but does not admit those headers.
+Configure probe inputs, compiler generated headers, bootstrap runtime replacement, and explicit GNU final-link policy remain unresolved.
+These construction controls do not complete the Debian runtime graph or qualify any release.
+Source promotion rejects all candidates until authenticated independent exact-digest quality approval is implemented.
+The current task IDs, scoped tests, native follow-up, and finite duty expiry are recorded in the workstream ledger.
+
 ## Debian 13 Slim
 
 Use Debian source packages, including Debian patches and `debian/rules`. Upstream tarballs alone do not preserve Debian packaging.

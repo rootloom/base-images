@@ -766,7 +766,13 @@ def publish():
         raise
 
 
+def require_independent_quality_approval(manifest):
+    # Builder results and unsigned approval files cannot authorize promotion.
+    raise ValueError('Authenticated independent exact-digest quality approval is not implemented')
+
+
 def promote_source(manifest, repo, tag):
+    require_independent_quality_approval(manifest)
     anonymous(manifest)
     with tempfile.TemporaryDirectory() as config:
         for arch, record in manifest['platforms'].items():

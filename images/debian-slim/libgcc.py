@@ -4,14 +4,69 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
+import tempfile
 
 from gcc_bootstrap import MATERIALS, SIGNER
 from origins import sha256, verify_record
 
 
 STARTUP = ("crtbegin.o", "crtbeginS.o", "crtbeginT.o", "crtend.o", "crtendS.o")
+
+
+def replay_generated_headers(work, source, source_files, retained, environment):
+    """Record local replay, without admitting unresolved configure probe inputs."""
+    inputs = []
+    retained.mkdir(parents=True, exist_ok=True)
+    for name in ("configure", "config.host", "config.in", "Makefile.in", "mkheader.sh"):
+        path = (source / name).resolve()
+        origin = source_files.get(str(path))
+        if not origin or origin["component"] != "gcc" or sha256(path) != origin["sha256"]:
+            raise ValueError("Unknown generated-header producer: " + str(path))
+        inputs.append({"path": str(path), **origin, "kind": "source"})
+    for name in ("Makefile", "config.status"):
+        path = work / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("Missing fresh configure output: " + name)
+        inputs.append({"path": str(path), "sha256": sha256(path), "kind": "configure-output"})
+    values = {}
+    makefile = (work / "Makefile").read_text()
+    for name in ("libgcc_tm_defines", "libgcc_tm_file"):
+        matches = re.findall(r"^" + name + r" = ([^\n]*)$", makefile, re.MULTILINE)
+        if len(matches) != 1 or any(char in matches[0] for char in "$`\\"):
+            raise ValueError("Unknown generated-header parameter: " + name)
+        values[name] = matches[0]
+    commands = [["/bin/sh", str(source / "mkheader.sh")],
+                ["/bin/sh", str(work / "config.status"),
+                 "--header=auto-target.h:" + str(source / "config.in")]]
+    generated = subprocess.check_output(commands[0], cwd=work,
+        env={**environment, "DEFINES": values["libgcc_tm_defines"], "HEADERS": values["libgcc_tm_file"]})
+    with tempfile.TemporaryDirectory(prefix="libgcc-header-replay-") as temporary:
+        subprocess.run(commands[1], cwd=temporary, env=environment, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        outputs = {"libgcc_tm.h": generated, "auto-target.h": (Path(temporary) / "auto-target.h").read_bytes()}
+        replay_directory = temporary
+    for item in inputs:
+        if sha256(item["path"]) != item["sha256"]:
+            raise ValueError("Generated-header producer changed during replay")
+        destination = retained / item["sha256"]
+        destination.write_bytes(Path(item["path"]).read_bytes())
+        item["retained"] = str(destination)
+    proofs = []
+    for name, data in outputs.items():
+        path = work / name
+        digest = hashlib.sha256(data).hexdigest()
+        if path.is_symlink() or not path.is_file() or sha256(path) != digest:
+            raise ValueError("Generated header differs from replay: " + name)
+        (retained / digest).write_bytes(data)
+        proofs.append({"path": str(path), "sha256": digest, "retained": str(retained / digest),
+                       "commands": commands, "parameters": values, "inputs": inputs,
+                       "working_directories": [str(work), replay_directory],
+                       "replay_verified": True, "admitted": False,
+                       "blocking_error": "Configure probes and compiler generated-header inputs remain unproved"})
+    return proofs
 
 
 def source_inputs(evidence):
@@ -144,15 +199,17 @@ def main():
     output = evidence / "gnu-libgcc.json"
     output.write_text(json.dumps(receipt, indent=2) + "\n")
     environment = {**os.environ, "PATH": "/gnu-bootstrap/bin:" + os.environ["PATH"]}
-    with (evidence / "gnu-libgcc.build.log").open("wb") as log:
-        for command in commands:
-            subprocess.run(command, cwd=work, env=environment, stdout=log, stderr=subprocess.STDOUT, check=True)
-    receipt["completed"] = True
     try:
+        with (evidence / "gnu-libgcc.build.log").open("wb") as log:
+            for command in commands:
+                subprocess.run(command, cwd=work, env=environment, stdout=log, stderr=subprocess.STDOUT, check=True)
+        receipt["completed"] = True
+        receipt["generated_headers"] = replay_generated_headers(
+            work, source, source_files, evidence / "sources/libgcc-producers", environment)
         receipt["artifacts"] = inspect_runtime(work, evidence / "sources/compilation", source_files,
                                                 evidence / "sources/libgcc")
         receipt["runtime_verified"] = True
-    except ValueError as error:
+    except (ValueError, subprocess.CalledProcessError, OSError) as error:
         receipt["blocking_error"] = str(error)
         raise
     finally:
