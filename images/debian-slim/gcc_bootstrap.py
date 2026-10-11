@@ -21,6 +21,8 @@ PREREQUISITES = ("gmp-6.2.1.tar.bz2", "mpfr-4.1.0.tar.bz2", "mpc-1.2.1.tar.gz")
 
 
 def main():
+    from origins import snapshot_sources
+
     inputs, directory, evidence = Path("/inputs"), Path("/build/gcc"), Path("/evidence")
     directory.mkdir()
     primary = verify_source(inputs, directory, SIGNER, MATERIALS)
@@ -66,6 +68,9 @@ def main():
                     for line in (patches / "series").read_text().splitlines() if line.strip()]
                 record["distro_defaults_sha256"] = hashlib.sha256(
                     (source / "src/gcc/distro-defaults.h").read_bytes()).hexdigest()
+                snapshot = evidence / "gcc.source-files.json"
+                snapshot_sources({source / "src": "gcc"}, snapshot)
+                record["source_snapshot_sha256"] = hashlib.sha256(snapshot.read_bytes()).hexdigest()
                 manifest = source / "src/contrib/prerequisites.sha512"
                 expected = {filename: checksum for checksum, filename in
                             (line.split() for line in manifest.read_text().splitlines())}

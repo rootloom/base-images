@@ -73,6 +73,8 @@ def verify_source(inputs, directory, signer, materials):
 
 
 def main():
+    from origins import snapshot_sources
+
     inputs, build, evidence = Path("/inputs"), Path("/build"), Path("/evidence")
     build.mkdir()
     evidence.mkdir()
@@ -99,6 +101,8 @@ def main():
                     subprocess.run(["patch", "--batch", "--fuzz=0", "-p1", *fields[1:]],
                                    cwd=source, stdin=patch_input, stdout=log, stderr=subprocess.STDOUT, check=True)
                 patch_records.append({"path": fields[0], "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
+        if name in ("linux", "glibc"):
+            snapshot_sources({source: name}, evidence / (name + ".source-files.json"))
         commands = [[str(source / "configure"), "--prefix=/bootstrap", "--disable-nls"]]
         work = source
         if name == "bison":
@@ -148,6 +152,9 @@ def main():
         record["sources"].append({"name": name, "version": version, "materials": dict(materials),
                                   "signing_fingerprint": signer, "primary_fingerprint": primary,
                                   "patches": patch_records, "commands": commands, "completed": False})
+        if name in ("linux", "glibc"):
+            record["sources"][-1]["source_snapshot_sha256"] = hashlib.sha256(
+                (evidence / (name + ".source-files.json")).read_bytes()).hexdigest()
         (evidence / "bootstrap.json").write_text(json.dumps(record, indent=2) + "\n")
         with (evidence / (name + ".build.log")).open("wb") as log:
             for command in commands:

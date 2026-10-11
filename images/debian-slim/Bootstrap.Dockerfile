@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM docker.io/library/gcc:15.2.0@sha256:3ae15afe768b06d0c0fe088d822ba5f8045c26630bdacc8d8e7713cf5d8e7289 AS bootstrap
 COPY images/debian-slim/bootstrap.py /recipe/bootstrap.py
+COPY images/source-minimal/compiler.py images/source-minimal/origins.py /recipe/
 COPY --from=inputs bison_3.8.2+dfsg-1.dsc bison_3.8.2+dfsg.orig.tar.xz bison_3.8.2+dfsg-1.debian.tar.xz debian-bison-source-key.asc /inputs/
 COPY --from=inputs gawk_5.2.1-2.dsc gawk_5.2.1.orig.tar.xz gawk_5.2.1-2.debian.tar.xz debian-gawk-source-key.asc /inputs/
 COPY --from=inputs autoconf2.69_2.69-3.1.dsc autoconf2.69_2.69.orig.tar.xz autoconf2.69_2.69-3.1.debian.tar.xz /inputs/

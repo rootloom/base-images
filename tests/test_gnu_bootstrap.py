@@ -127,6 +127,13 @@ class GnuBootstrapTests(unittest.TestCase):
         self.assertIn("--enable-link-mutex", record["commands"][2])
         self.assertTrue(record["patches"])
         self.assertRegex(record["distro_defaults_sha256"], r"^[a-f0-9]{64}$")
+        snapshot = evidence / "gcc.source-files.json"
+        self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(), record["source_snapshot_sha256"])
+        index = json.loads(snapshot.read_text())
+        self.assertTrue(index)
+        self.assertEqual({item["component"] for item in index.values()}, {"gcc"})
+        self.assertEqual(index["/build/gcc/gcc-14-14.2.0/src/gcc/distro-defaults.h"]["sha256"],
+                         record["distro_defaults_sha256"])
         self.assertGreater((evidence / "gcc-bootstrap.build.log").stat().st_size, 0)
 
     @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_EVIDENCE"), "Native GNU build evidence is required")
@@ -144,6 +151,12 @@ class GnuBootstrapTests(unittest.TestCase):
                 self.assertEqual(item["signing_fingerprint"], expected[3])
                 self.assertTrue(item["patches"])
                 self.assertGreater((evidence / (item["name"] + ".build.log")).stat().st_size, 0)
+                if item["name"] in ("linux", "glibc"):
+                    snapshot = evidence / (item["name"] + ".source-files.json")
+                    self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(), item["source_snapshot_sha256"])
+                    index = json.loads(snapshot.read_text())
+                    self.assertTrue(index)
+                    self.assertEqual({entry["component"] for entry in index.values()}, {item["name"]})
 
 
 if __name__ == "__main__":

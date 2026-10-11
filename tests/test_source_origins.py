@@ -62,6 +62,31 @@ class SourceOrigins(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
             origins.input_origin(header, index)
 
+    def test_snapshot_freezes_gnu_source_inputs(self):
+        source = self.root / "gcc"
+        source.mkdir()
+        header = source / "stddef.h"
+        header.write_bytes(b"verified source header")
+        output = self.root / "source-files.json"
+        origins.snapshot_sources({source: "gcc"}, output)
+        index = json.loads(output.read_text())
+        self.assertEqual(origins.input_origin(header, index), "gcc")
+        header.write_bytes(b"unrecorded generated input")
+        with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
+            origins.input_origin(header, index)
+
+    def test_snapshot_rejects_escaping_source_symlink(self):
+        source = self.root / "gcc"
+        source.mkdir()
+        (self.root / "bootstrap.h").write_bytes(b"binary bootstrap header")
+        (source / "header.h").symlink_to(self.root / "bootstrap.h")
+        with self.assertRaisesRegex(ValueError, "Source symlink escapes locked tree"):
+            origins.snapshot_sources({source: "gcc"}, self.root / "source-files.json")
+
+    def test_snapshot_rejects_missing_source_tree(self):
+        with self.assertRaisesRegex(ValueError, "Missing locked source tree"):
+            origins.snapshot_sources({self.root / "missing": "gcc"}, self.root / "source-files.json")
+
     def test_unindexed_source_tree_header_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
             origins.input_origin("/build/musl-1.2.6/include/copied-bootstrap.h", {})

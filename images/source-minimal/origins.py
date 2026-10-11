@@ -30,6 +30,20 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def snapshot_sources(trees, output):
+    index = {}
+    for tree, component in trees.items():
+        tree = Path(tree).resolve()
+        if not tree.is_dir():
+            raise ValueError(f"Missing locked source tree: {tree}")
+        for path in sorted(tree.rglob("*")):
+            if path.is_file():
+                if not path.resolve().is_relative_to(tree):
+                    raise ValueError(f"Source symlink escapes locked tree: {path}")
+                index[str(path.resolve())] = {"component": component, "sha256": sha256(path)}
+    Path(output).write_text(json.dumps(index, sort_keys=True, indent=2) + "\n")
+
+
 def input_origin(path, source_files=None):
     path = Path(path).resolve()
     if source_files is None:
@@ -234,11 +248,4 @@ def closure(root, lock):
 if __name__ == "__main__":
     if sys.argv[1:] != ["snapshot"]:
         raise ValueError("Use origins.py snapshot after verified extraction and patching")
-    index = {}
-    for tree, component in SOURCE_TREES.items():
-        for path in sorted(Path(tree).rglob("*")):
-            if path.is_file():
-                if not path.resolve().is_relative_to(tree):
-                    raise ValueError(f"Source symlink escapes locked tree: {path}")
-                index[str(path.resolve())] = {"component": component, "sha256": sha256(path)}
-    Path("/evidence/sources/source-files.json").write_text(json.dumps(index, sort_keys=True, indent=2) + "\n")
+    snapshot_sources(SOURCE_TREES, "/evidence/sources/source-files.json")

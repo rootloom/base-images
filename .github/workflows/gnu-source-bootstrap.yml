@@ -6,6 +6,8 @@ on:
       - images/debian-slim/Bootstrap.Dockerfile
       - images/debian-slim/*bootstrap.py
       - images/debian-slim/source-keys.tar.gz
+      - images/source-minimal/compiler.py
+      - images/source-minimal/origins.py
       - scripts/gnu_bootstrap_inputs.py
       - tests/test_gnu_bootstrap.py
       - .github/workflows/gnu-source-bootstrap.yml
