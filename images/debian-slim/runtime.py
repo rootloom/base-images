@@ -3,9 +3,37 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
+from headers import make_header
 from origins import input_origin, sha256
+
+
+def generated_inputs(libc, source_files, retained):
+    makefile = libc / "math/Makefile"
+    text = makefile.read_text()
+    rule = re.search(r"^\$\(objpfx\)gen-libm-templates.stmp: Makefile\n.*?(?=^\n)",
+                     text, re.M | re.S).group()
+    calls = re.search(r"^gen-calls = .*?$", text, re.M).group()
+    suffixes = "\n".join(re.findall(r"^type-(?:double|float|ldouble|float128)-suffix :=.*?$", text, re.M))
+    body = ("objpfx := math/\nmake-target-directory = mkdir -p math\n" + calls + "\n" + suffixes +
+            "\ntypes := double float ldouble float128\ngen-all-calls = $(gen-calls)\n" + rule + "\n")
+    generated = {}
+    for suffix in ("", "f", "l", "f128"):
+        target = "math/s_ldexp" + suffix + ".c"
+        generated[target] = make_header(
+            "glibc", [makefile], body + target + ": math/gen-libm-templates.stmp\n",
+            target, source_files, retained)
+    makefile = libc / "locale/Makefile"
+    script = libc / "locale/gen-translit.py"
+    rule = re.search(r"^\$\(objpfx\)C-translit.h:.*?(?=^\n)", makefile.read_text(), re.M | re.S).group()
+    body = ("objpfx := locale/\nmake-target-directory = mkdir -p locale\nPYTHON := python3\n" +
+            "VPATH := " + str(libc / "locale") + "\n" + rule.replace("gen-translit.py", str(script)) + "\n")
+    generated["locale/C-translit.h"] = make_header(
+        "glibc", [makefile, script, libc / "locale/C-translit.h.in"], body,
+        "locale/C-translit.h", source_files, retained)
+    return generated
 
 
 def main():
@@ -43,6 +71,10 @@ def main():
     unknown = {}
     retained = evidence / "sources/trace-inputs"
     retained.mkdir()
+    producer_inputs = evidence / "runtime-inputs"
+    producer_inputs.mkdir()
+    generated = generated_inputs(Path("/build/glibc/glibc-2.41"), source_files, producer_inputs)
+    verified_inputs = {}
     for record in records:
         for item in record["inputs"]:
             if sha256(item["path"]) != item["sha256"]:
@@ -51,7 +83,14 @@ def main():
             try:
                 input_origin(item["path"], source_files)
             except ValueError:
-                unknown[item["path"]] = item["sha256"]
+                relative = str(Path(item["path"]).relative_to(work)) if Path(item["path"]).is_relative_to(work) else None
+                producer = generated.get(relative)
+                if producer:
+                    if producer["sha256"] != item["sha256"]:
+                        raise ValueError("Runtime input differs from its source producer: " + item["path"])
+                    verified_inputs[item["path"]] = producer
+                else:
+                    unknown[item["path"]] = item["sha256"]
     maps = evidence / "sources/link-maps"
     link_maps = {path.name: sha256(path) for path in sorted(maps.glob("*.map"))}
     if not link_maps:
@@ -59,7 +98,7 @@ def main():
     libc = work / "libc.so"
     receipt = {"scope": "gnu-runtime-trace", "release_qualified": False, "completed": True,
                "commands": commands, "compiler_records": len(records), "link_maps": link_maps,
-               "unknown_inputs": unknown, "libc_sha256": sha256(libc),
+               "unknown_inputs": unknown, "verified_inputs": verified_inputs, "libc_sha256": sha256(libc),
                "header_audit_sha256": sha256(evidence / "gnu-headers.json")}
     (evidence / "gnu-libc-trace.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps({"compiler_records": len(records), "unknown_inputs": unknown}), flush=True)
