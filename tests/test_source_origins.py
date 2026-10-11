@@ -30,6 +30,12 @@ class SourceOrigins(unittest.TestCase):
         text = "object.o: /source.c \\\n /header.h\n/header.h:\n"
         self.assertEqual(compiler.dependency_inputs(text), [Path("/source.c"), Path("/header.h")])
 
+    def test_assembly_generation_is_not_an_object_record(self):
+        arguments = ["-c", "-S", "-o", "/build/generated.S", "/source.c"]
+        with patch.object(compiler.subprocess, "run") as run:
+            compiler.main(arguments)
+        run.assert_called_once_with(["gcc", *arguments], check=True)
+
     def test_gnu_link_trace_adds_distinct_maps(self):
         with patch.object(trace.compiler, "main") as run, patch.object(Path, "mkdir"):
             trace.main(["-o", "/build/libc.so", "object.o"])

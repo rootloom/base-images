@@ -47,7 +47,7 @@ def link_scripts(args):
 
 
 def main(args):
-    if "-c" not in args or "-o" not in args:
+    if "-c" not in args or "-o" not in args or "-S" in args or "-E" in args:
         subprocess.run(["gcc", *args], check=True)
         if "-o" in args and not any(flag in args for flag in ["-E", "-S"]):
             output = Path(args[args.index("-o") + 1]).resolve()
