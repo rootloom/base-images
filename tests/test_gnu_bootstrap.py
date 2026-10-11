@@ -29,6 +29,46 @@ with patch.dict(sys.modules, {"bootstrap": BOOTSTRAP}):
 
 
 class GnuBootstrapTests(unittest.TestCase):
+    def runtime_sources(self, root, evidence, machine):
+        snapshot = json.loads((evidence / "glibc.source-files.json").read_text())
+        sysdirs = ["sysdeps/x86_64/64", "sysdeps/x86"] if machine == "x86_64" else ["sysdeps/aarch64"]
+        names = ["math/Makefile", "locale/Makefile", "locale/gen-translit.py", "locale/C-translit.h.in",
+                 "csu/Makefile", "abi-tags", "Makerules", "libc-abis", "scripts/gen-libc-abis",
+                 "scripts/move-if-change", "Makeconfig", "scripts/gen-tunables.awk", *[
+                     name + "/dl-tunables.list" for name in ["elf", "sysdeps/nptl", *sysdirs]]]
+        index = {}
+        with tarfile.open(Path(os.environ["GNU_BOOTSTRAP_INPUTS"]) / "glibc_2.41.orig.tar.xz") as archive:
+            for name in names:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(archive.extractfile("glibc-2.41/" + name).read())
+                index[str(path)] = snapshot["/build/glibc/glibc-2.41/" + name]
+        bootstrap = json.loads((evidence / "bootstrap.json").read_text())
+        vendor = next(item for item in bootstrap["sources"] if item["name"] == "glibc")
+        patches = {item["path"]: item["sha256"] for item in vendor["patches"]}
+        with tarfile.open(Path(os.environ["GNU_BOOTSTRAP_INPUTS"]) / "glibc_2.41-12+deb13u4.debian.tar.xz") as archive:
+            series = archive.extractfile("debian/patches/series").read().decode().splitlines()
+            for line in series:
+                fields = line.split("#", 1)[0].split()
+                if not fields:
+                    continue
+                self.assertEqual(len(fields), 1, "Replay requires declared patch strip options")
+                data = archive.extractfile("debian/patches/" + fields[0]).read()
+                self.assertEqual(hashlib.sha256(data).hexdigest(), patches[fields[0]])
+                subprocess.run(["git", "apply", "-p1", *["--include=" + name for name in names]],
+                               input=data, cwd=root, check=True)
+        for path, source in index.items():
+            self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(), source["sha256"], path)
+        return index
+
+    @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE"),
+                         "Real GNU source and runtime inputs are required")
+    def test_runtime_sources_match_vendor_patch_snapshot(self):
+        evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
+        machine = json.loads((evidence / "gnu-libc-trace.json").read_text())["machine"]
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertTrue(self.runtime_sources(Path(directory).resolve(), evidence, machine))
+
     @unittest.skipUnless(os.environ.get("GNU_BOOTSTRAP_INPUTS") and os.environ.get("GNU_RUNTIME_TRACE_EVIDENCE")
                          and shutil.which("gawk"), "Real GNU source, runtime inputs, and GNU awk are required")
     def test_runtime_recipes_reproduce_consumed_inputs(self):
@@ -40,27 +80,13 @@ class GnuBootstrapTests(unittest.TestCase):
             spec.loader.exec_module(runtime)
         evidence = Path(os.environ["GNU_RUNTIME_TRACE_EVIDENCE"])
         report = json.loads((evidence / "gnu-libc-trace.json").read_text())
-        snapshot = json.loads((evidence / "glibc.source-files.json").read_text())
         machine = report["machine"]
         constructor = tempfile.TemporaryDirectory
         with constructor() as directory:
             root = Path(directory).resolve()
             retained = root / "retained"
             retained.mkdir()
-            sysdirs = ["sysdeps/x86_64/64", "sysdeps/x86"] if machine == "x86_64" else ["sysdeps/aarch64"]
-            names = ["math/Makefile", "locale/Makefile", "locale/gen-translit.py", "locale/C-translit.h.in",
-                     "csu/Makefile", "abi-tags", "Makerules", "libc-abis", "scripts/gen-libc-abis",
-                     "scripts/move-if-change", "Makeconfig", "scripts/gen-tunables.awk", *[
-                         name + "/dl-tunables.list" for name in ["elf", "sysdeps/nptl", *sysdirs]]]
-            index = {}
-            with tarfile.open(Path(os.environ["GNU_BOOTSTRAP_INPUTS"]) / "glibc_2.41.orig.tar.xz") as archive:
-                for name in names:
-                    path = root / name
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(archive.extractfile("glibc-2.41/" + name).read())
-                    source = snapshot["/build/glibc/glibc-2.41/" + name]
-                    self.assertEqual(headers.sha256(path), source["sha256"])
-                    index[str(path)] = source
+            index = self.runtime_sources(root, evidence, machine)
             with patch.object(headers.tempfile, "TemporaryDirectory", side_effect=lambda **kw: constructor(dir=root)):
                 generated = runtime.generated_inputs(root, index, retained, machine, shutil.which("gawk"))
             expected = {**report["unknown_inputs"], **{
