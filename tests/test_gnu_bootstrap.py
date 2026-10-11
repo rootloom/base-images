@@ -153,7 +153,17 @@ class GnuBootstrapTests(unittest.TestCase):
                 self.assertRegex(header["sha256"], r"^[a-f0-9]{64}$")
                 retained = evidence / "header-inputs" / header["sha256"]
                 self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(), header["sha256"])
-                self.assertEqual(header["verified"], bool(header["sources"]))
+                self.assertEqual(header["verified"], bool(header["sources"] or header.get("producer")))
+                if header.get("producer"):
+                    producer = header["producer"]
+                    self.assertEqual(producer["sha256"], header["sha256"])
+                    self.assertTrue(producer["inputs"])
+                    self.assertTrue(producer["command"])
+                    for source in producer["inputs"]:
+                        self.assertEqual(source_files[source["path"]],
+                                         {"sha256": source["sha256"], "component": source["component"]})
+                        retained = evidence / "header-inputs" / source["sha256"]
+                        self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(), source["sha256"])
                 for source in header["sources"]:
                     self.assertEqual(source_files[source["path"]]["sha256"], header["sha256"])
                     self.assertEqual(source_files[source["path"]]["component"], source["component"])

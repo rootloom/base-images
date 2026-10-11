@@ -114,6 +114,23 @@ class SourceOrigins(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Installed header symlink escapes"):
             headers.audit_headers([installed], {})
 
+    def test_generated_header_requires_exact_producer_bytes(self):
+        installed = self.root / "include"
+        installed.mkdir()
+        header = installed / "limits.h"
+        header.write_bytes(b"generated from verified fragments")
+        source = self.root / "fragment.txt"
+        source.write_bytes(header.read_bytes())
+        reference = {"path": str(source), "sha256": origins.sha256(source), "component": "gcc"}
+        index = {str(source): {"sha256": reference["sha256"], "component": "gcc"}}
+        producer = {"sha256": origins.sha256(header), "inputs": [reference], "command": ["cat"]}
+        self.assertTrue(headers.audit_headers([installed], index, {str(header): producer})[0]["verified"])
+        with self.assertRaisesRegex(ValueError, "lacks source producer inputs"):
+            headers.audit_headers([installed], {}, {str(header): {**producer, "inputs": []}})
+        header.write_bytes(b"different bootstrap bytes")
+        with self.assertRaisesRegex(ValueError, "Generated header differs"):
+            headers.audit_headers([installed], index, {str(header): producer})
+
     def test_unindexed_source_tree_header_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unreviewed compiler input"):
             origins.input_origin("/build/musl-1.2.6/include/copied-bootstrap.h", {})
