@@ -50,7 +50,7 @@
       "promotion_confirmed": false,
       "registry": "ghcr.io/rootloom/debian-slim",
       "scan_finished_at": "2026-10-10T14:43:46.850333+00:00",
-      "scan_stale": false,
+      "scan_stale": true,
       "scanner": {
         "actual_version": "Version: 0.75.0",
         "database": {
@@ -127,7 +127,7 @@
       "promotion_confirmed": false,
       "registry": "ghcr.io/rootloom/ubi-minimal",
       "scan_finished_at": "2026-10-10T14:43:46.701539+00:00",
-      "scan_stale": false,
+      "scan_stale": true,
       "scanner": {
         "actual_version": "Version: 0.75.0",
         "database": {
@@ -204,7 +204,7 @@
       "promotion_confirmed": false,
       "registry": "ghcr.io/rootloom/alpine",
       "scan_finished_at": "2026-10-10T14:45:04.622324+00:00",
-      "scan_stale": false,
+      "scan_stale": true,
       "scanner": {
         "actual_version": "Version: 0.75.0",
         "database": {
@@ -281,7 +281,7 @@
       "promotion_confirmed": false,
       "registry": "ghcr.io/rootloom/ubuntu",
       "scan_finished_at": "2026-10-10T14:46:13.465784+00:00",
-      "scan_stale": false,
+      "scan_stale": true,
       "scanner": {
         "actual_version": "Version: 0.75.0",
         "database": {
