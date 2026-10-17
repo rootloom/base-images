@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM docker.io/library/gcc:15.2.0@sha256:3ae15afe768b06d0c0fe088d822ba5f8045c26630bdacc8d8e7713cf5d8e7289 AS bootstrap
+FROM docker.io/library/gcc:16.2.0@sha256:17043c23ec2ad97fc3beca18da77275d26be5db5cd70ea0a5d73200e21a8e999 AS bootstrap
 COPY images/debian-slim/bootstrap.py /recipe/bootstrap.py
 COPY images/source-minimal/compiler.py images/source-minimal/origins.py /recipe/
 COPY --from=inputs bison_3.8.2+dfsg-1.dsc bison_3.8.2+dfsg.orig.tar.xz bison_3.8.2+dfsg-1.debian.tar.xz debian-bison-source-key.asc /inputs/
