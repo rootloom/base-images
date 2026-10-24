@@ -1,4 +1,4 @@
-FROM docker.io/library/gcc:15.2.0@sha256:3ae15afe768b06d0c0fe088d822ba5f8045c26630bdacc8d8e7713cf5d8e7289 AS fetch
+FROM docker.io/library/gcc:16.1.0@sha256:d8dec2859f964120119abd1380563247bf02c5d64f5bcdea496dbace1f48c6f0 AS fetch
 ENV PYTHONDONTWRITEBYTECODE=1
 COPY images/source-minimal/ /recipe/
 COPY images/alpine/ /alpine/
