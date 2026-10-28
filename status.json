@@ -325,9 +325,9 @@
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "source-minimal",
       "last_attempt": {
-        "finished_at": "2026-10-28T07:50:11.513780+00:00",
+        "finished_at": "2026-10-28T20:13:28.404547+00:00",
         "status": "blocked",
-        "url": "https://github.com/rootloom/base-images/releases/tag/source-source-minimal-40650080095-1"
+        "url": "https://github.com/rootloom/base-images/releases/tag/source-source-minimal-40756945408-1"
       },
       "platforms": {},
       "registry": "ghcr.io/rootloom/source-minimal",
