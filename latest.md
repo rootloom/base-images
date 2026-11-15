@@ -9,8 +9,8 @@ Registry verification does not prove that an image has no CVEs.
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | debian-slim | amd64 | registry-verified; scan &gt;48h old | 0 | 43 | 58 | 60 | 1 | 2026-10-10T14:43:46.850333+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38060528323-1) |
 | debian-slim | arm64 | registry-verified; scan &gt;48h old | 0 | 43 | 58 | 60 | 1 | 2026-10-10T14:43:46.850333+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-debian-slim-38060528323-1) |
-| ubi-minimal | amd64 | registry-verified; scan &gt;48h old | 0 | 12 | 102 | 75 | 0 | 2026-10-10T14:43:46.701539+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38060528323-1) |
-| ubi-minimal | arm64 | registry-verified; scan &gt;48h old | 0 | 12 | 104 | 77 | 0 | 2026-10-10T14:43:46.701539+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38060528323-1) |
+| ubi-minimal | amd64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
+| ubi-minimal | arm64 | unverified | ? | ? | ? | ? | ? | ? | unavailable |
 | alpine | amd64 | registry-verified; scan &gt;48h old | 0 | 0 | 0 | 0 | 0 | 2026-10-10T14:45:04.622324+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-alpine-38060528323-1) |
 | alpine | arm64 | registry-verified; scan &gt;48h old | 0 | 0 | 0 | 0 | 0 | 2026-10-10T14:45:04.622324+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-alpine-38060528323-1) |
 | ubuntu | amd64 | registry-verified; scan &gt;48h old | 0 | 0 | 9 | 4 | 0 | 2026-10-10T14:46:13.465784+00:00 | [reports](https://github.com/rootloom/base-images/releases/tag/standard-ubuntu-38060528323-1) |
@@ -42,13 +42,8 @@ Reports cover known vulnerabilities at scan time. Older digests are not rescanne
 ### ubi-minimal
 
 - Live index digest: `sha256:56bd349c428e823c3b9d2bf62c1f0f97df9913272fb813ac8523660204203db0`
-- Source commit: `401afc1204c0a930e2562a677d3eab242396d330`
-- Scanner: Trivy `0.75.0`
-- Public SBOMs, CVE reports, and checksums: [evidence](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38060528323-1)
-- Upstream: `registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:907b68736aa798b2d38255b7aa070b2a70acb90803864a40f05d0ec47556ddd0`
-- amd64 digest: `sha256:c82031db52a1cc77806cdbef05109a53a8ef00d82c00b7fd29b987c89df7af07`
-- arm64 digest: `sha256:54dace07c7a651cdc98025a192870876577342e37408bf42d6c1ff740abbc2df`
 - Last attempt qualification: passed, 2026-10-10T22:29:57.711394+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38091536242-1)
+- Matching public scan evidence could not be verified. CVE counts are unknown.
 
 ### alpine
 
@@ -75,12 +70,12 @@ Reports cover known vulnerabilities at scan time. Older digests are not rescanne
 ### rocky-minimal
 
 - Live index digest: `unknown`
-- Last attempt qualification: passed, 2026-10-10T22:33:31.230311+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/standard-rocky-minimal-38091536242-1)
+- Last attempt qualification: unverified, unknown. [Evidence](https://github.com/rootloom/base-images/releases)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 
 ### source-minimal
 
 - Live index digest: `unknown`
-- Last attempt qualification: blocked, 2026-11-15T07:51:40.884224+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/source-source-minimal-43691760938-1)
+- Last attempt qualification: blocked, 2026-11-15T15:43:01.291942+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/source-source-minimal-43729390691-1)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 - Coverage: NVD-CPE component matching only; not distribution advisory coverage
