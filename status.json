@@ -78,7 +78,7 @@
       "version_tag": "standard-38060528323-1"
     },
     {
-      "error": "Matching public scan evidence could not be verified. CVE counts are unknown.",
+      "evidence_url": "https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38060528323-1",
       "image": "ubi-minimal",
       "last_attempt": {
         "finished_at": "2026-10-10T22:29:57.711394+00:00",
@@ -86,9 +86,73 @@
         "url": "https://github.com/rootloom/base-images/releases/tag/standard-ubi-minimal-38091536242-1"
       },
       "latest_digest": "sha256:56bd349c428e823c3b9d2bf62c1f0f97df9913272fb813ac8523660204203db0",
-      "platforms": {},
+      "platforms": {
+        "amd64": {
+          "digest": "sha256:c82031db52a1cc77806cdbef05109a53a8ef00d82c00b7fd29b987c89df7af07",
+          "fixable_high_critical": 0,
+          "os": {
+            "Family": "redhat",
+            "Name": "9.8"
+          },
+          "package_count": null,
+          "report_url": "https://github.com/rootloom/base-images/releases/download/standard-ubi-minimal-38060528323-1/amd64.cve.json",
+          "severity_counts": {
+            "CRITICAL": 0,
+            "HIGH": 12,
+            "LOW": 75,
+            "MEDIUM": 102,
+            "UNKNOWN": 0
+          },
+          "size_bytes": null
+        },
+        "arm64": {
+          "digest": "sha256:54dace07c7a651cdc98025a192870876577342e37408bf42d6c1ff740abbc2df",
+          "fixable_high_critical": 0,
+          "os": {
+            "Family": "redhat",
+            "Name": "9.8"
+          },
+          "package_count": null,
+          "report_url": "https://github.com/rootloom/base-images/releases/download/standard-ubi-minimal-38060528323-1/arm64.cve.json",
+          "severity_counts": {
+            "CRITICAL": 0,
+            "HIGH": 12,
+            "LOW": 77,
+            "MEDIUM": 104,
+            "UNKNOWN": 0
+          },
+          "size_bytes": null
+        }
+      },
+      "promotion_confirmed": false,
       "registry": "ghcr.io/rootloom/ubi-minimal",
-      "state": "unverified"
+      "scan_finished_at": "2026-10-10T14:43:46.701539+00:00",
+      "scan_stale": true,
+      "scanner": {
+        "actual_version": "Version: 0.75.0",
+        "database": {
+          "DownloadedAt": "2026-10-10T14:43:26.958403079Z",
+          "NextUpdate": "2026-10-11T12:33:35.352381125Z",
+          "UpdatedAt": "2026-10-10T12:33:35.352381306Z",
+          "Version": 2
+        },
+        "database_repository": "mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2",
+        "database_sha256": "56e17f3bd7565b1e6d865fbd2b7d98b99e83315883c0afa50c24e6f676248ad5",
+        "name": "Trivy",
+        "version": "0.75.0"
+      },
+      "source_commit": "401afc1204c0a930e2562a677d3eab242396d330",
+      "state": "registry-verified",
+      "supported_version_tag": "9.7",
+      "upstream": {
+        "digest": "sha256:907b68736aa798b2d38255b7aa070b2a70acb90803864a40f05d0ec47556ddd0",
+        "platforms": {
+          "amd64": "sha256:b966f21589d418d1e02159cb8e03e261fc8c4ee9061258893f5e4e33986aac4c",
+          "arm64": "sha256:799439b4e4a2c1d6fb1cc72a7f25b7450a9655ff8c753a63cffa3de548cc31a0"
+        },
+        "reference": "registry.access.redhat.com/ubi9/ubi-minimal:9.7"
+      },
+      "version_tag": "standard-38060528323-1"
     },
     {
       "evidence_url": "https://github.com/rootloom/base-images/releases/tag/standard-alpine-38060528323-1",
@@ -248,9 +312,9 @@
       "error": "Latest tag could not be read. Do not treat missing data as zero CVEs.",
       "image": "rocky-minimal",
       "last_attempt": {
-        "finished_at": "unknown",
-        "status": "unverified",
-        "url": "https://github.com/rootloom/base-images/releases"
+        "finished_at": "2026-10-10T22:33:31.230311+00:00",
+        "status": "passed",
+        "url": "https://github.com/rootloom/base-images/releases/tag/standard-rocky-minimal-38091536242-1"
       },
       "platforms": {},
       "registry": "ghcr.io/rootloom/rocky-minimal",
