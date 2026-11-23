@@ -1,8 +1,10 @@
 # Rootloom Base Images
 
-[Overview](README.md) | [Latest Images](latest.md) | [Version History](https://github.com/rootloom/base-images/releases)
+[Overview](README.md) | [Latest Images](latest.md) | [Version History](https://github.com/rootloom/base-images/releases) | [Operating Plan](docs/operating-plan.md)
 
 The target is six minimal source-built bases for `linux/amd64` and `linux/arm64`.
+Rootloom aims to offer free public pulls and public release evidence for each image.
+The first release target is `source-minimal` for teams deploying self-contained Linux applications.
 Each final image must start with `FROM scratch`. Its distribution components
 and packages must come from compiled, verified source, not upstream binary
 images or downloaded binary packages.
