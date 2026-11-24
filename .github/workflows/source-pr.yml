@@ -4,6 +4,7 @@ on:
     paths:
       - images/source-minimal/**
       - scripts/source_release.py
+      - scripts/stage_musl_patch.py
       - scripts/release.py
       - tests/test_source*.py
       - .github/workflows/source-*.yml

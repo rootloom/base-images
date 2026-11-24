@@ -41,6 +41,24 @@ Keep task limits in force until the assignment ends. Routine integration does no
 A staged update is not a release. Do not give pull requests publishing credentials or let them write registry or release tags.
 An unchanged rebuild tests existing pins. It does not validate a proposed update.
 
+### Musl Patch Proposal
+
+The offline tool accepts one reviewed MIT-licensed musl `git format-patch` attachment from the musl or oss-security mailing list.
+Provide `review.json` with `name`, `url`, `upstream_commit`, and `sha256` strings.
+Independently verify the metadata against upstream evidence before running the tool.
+The tool checks the local bytes and commit header. It does not authenticate upstream or prove that the patch applies to musl.
+
+From a clean checkout at the intended base commit, run:
+
+```sh
+python3 -B scripts/stage_musl_patch.py review.json upstream.patch > proposal.diff
+git apply --check proposal.diff
+```
+
+The output records the base commit and proposes changes to the source lock and build recipe.
+After review, apply the diff on that base and open a PR with the upstream evidence.
+Do not commit the local input files or the generated diff. The native PR checks must test the proposed lock.
+
 ## Qualify A Release
 
 1. Prove verified source origins and repeatable native builds for both platforms.

@@ -549,6 +549,13 @@ def handoff(restore=False, arch=None):
                 shutil.copyfile(path, OUT / path.name)
 
 
+def export_runtime(arch, tag, publish):
+    # The local Docker exporter cannot load an index with provenance attestations.
+    export = ('--provenance=mode=max', '--push') if publish else ('--provenance=false', '--load')
+    run('docker', 'buildx', 'build', '--platform', 'linux/' + arch, '-f', str(ROOT / 'Dockerfile'),
+        '--target', 'runtime', '--build-arg', 'BUILD_NONCE=2', *export, '-t', tag, '.')
+
+
 def build(arch, publish=True):
     native = {'x86_64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}[platform.machine()]
     if native != arch:
@@ -587,9 +594,7 @@ def build(arch, publish=True):
                 bundle.add(sources, arcname='sources')
             record['corresponding_source_sha256'] = sha(OUT / (arch + '.sources.tar.gz'))
             tag = IMAGE + ':candidate-' + attempt['version_tag'] + '-' + arch if publish else 'rootloom-source-test:' + arch
-            run('docker', 'buildx', 'build', '--platform', 'linux/' + arch, '-f', str(ROOT / 'Dockerfile'),
-                '--target', 'runtime', '--build-arg', 'BUILD_NONCE=2', '--provenance=mode=max',
-                '--push' if publish else '--load', '-t', tag, '.')
+            export_runtime(arch, tag, publish)
             if publish:
                 candidate_digest, index = inspect(tag)
                 record['candidate_index_digest'] = candidate_digest
