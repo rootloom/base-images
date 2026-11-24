@@ -38,6 +38,15 @@ class SourceReleaseTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
+    def test_runtime_export_keeps_attestations_only_for_registry_push(self):
+        for publish, export in ((False, ('--provenance=false', '--load')),
+                                (True, ('--provenance=mode=max', '--push'))):
+            with self.subTest(publish=publish), patch.object(source, 'run') as run:
+                source.export_runtime('amd64', 'fixture:amd64', publish)
+                run.assert_called_once_with('docker', 'buildx', 'build', '--platform', 'linux/amd64',
+                    '-f', str(source.ROOT / 'Dockerfile'), '--target', 'runtime', '--build-arg',
+                    'BUILD_NONCE=2', *export, '-t', 'fixture:amd64', '.')
+
     def test_draft_snapshot_restore_checks_identity_assets_and_database(self):
         env = dict(GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='2', GITHUB_SHA=HASH)
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env), patch.object(source, 'run') as run:
