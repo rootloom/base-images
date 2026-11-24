@@ -1,17 +1,18 @@
 """Validate independent standard-image approval. This module never promotes images.
 
-Public v1 contract: the signed JSON has schema_version, candidate, approver,
+The v2 contract has schema_version, candidate, approver,
 issued_at, expires_at, and results. candidate must exactly match the trusted
 expected mapping, including repository, source_commit, producer (identity,
-workflow_sha, run_id, run_attempt), image, index_digest, platforms (architecture
+workflow_sha, run_id, run_attempt, actor_id), image, index_digest, platforms (architecture
 to digest), evidence (public asset name to SHA256), and variant='standard'.
-approver must exactly match trusted identity/workflow_sha/run_id/run_attempt.
+approver must exactly match the trusted workflow binding, including actor_id.
 results maps each architecture to every REQUIRED_CHECKS entry set to 'passed'.
 
 The caller must derive expected from independently checked retained evidence,
 not approval JSON. Include every retained qualification asset in evidence.
 Trust must come from reviewed release configuration and an
-independently observed approval run. The approval workflow must report its own
+independently observed approval run. Take actor IDs from GitHub run metadata,
+not workflow inputs or approval JSON. The approval workflow must report its own
 run metadata and must not sign caller-provided statements without qualification.
 Cosign authenticates identity, issuer and workflow SHA; signed run claims need
 that workflow enforcement. Require a new-format Sigstore bundle and Cosign v2.5.0.
@@ -45,8 +46,10 @@ def _object(pairs):
 
 
 def _workflow(value, repository):
-    if not isinstance(value, dict) or set(value) != {'identity', 'workflow_sha', 'run_id', 'run_attempt'}:
+    if not isinstance(value, dict) or set(value) != {'identity', 'workflow_sha', 'run_id', 'run_attempt', 'actor_id'}:
         raise ValueError('Incomplete workflow binding')
+    if type(value['actor_id']) is not int or value['actor_id'] < 1:
+        raise ValueError('Invalid GitHub actor ID')
     identity = value['identity']
     if not isinstance(identity, str) or not re.fullmatch(
             r'https://github\.com/' + re.escape(repository) +
@@ -87,6 +90,8 @@ def validate_approval(approval_path, bundle_path, expected, trust, *, runner=run
     producer = expected['producer']
     if trust['identity'].split('@')[0] == producer['identity'].split('@')[0] or trust['run_id'] == producer['run_id']:
         raise ValueError('Self approval is forbidden')
+    if trust['actor_id'] == producer['actor_id']:
+        raise ValueError('Self approval by the producer actor is forbidden')
     if producer['workflow_sha'] != expected['source_commit']:
         raise ValueError('Producer workflow SHA does not match source commit')
     if not isinstance(expected['image'], str) or not re.fullmatch(r'ghcr\.io/rootloom/[a-z0-9][a-z0-9._-]*', expected['image']):
@@ -125,8 +130,12 @@ def validate_approval(approval_path, bundle_path, expected, trust, *, runner=run
     if not isinstance(approval, dict) or set(approval) != {
             'schema_version', 'candidate', 'approver', 'issued_at', 'expires_at', 'results'}:
         raise ValueError('Invalid approval schema')
-    if type(approval['schema_version']) is not int or approval['schema_version'] != 1:
+    if type(approval['schema_version']) is not int or approval['schema_version'] != 2:
         raise ValueError('Unsupported approval schema')
+    if not isinstance(approval['candidate'], dict):
+        raise ValueError('Invalid approval candidate')
+    _workflow(approval['candidate'].get('producer'), repository)
+    _workflow(approval['approver'], repository)
     if approval['candidate'] != expected or approval['approver'] != trust:
         raise ValueError('Approval candidate or approver mismatch')
     issued, expires = _time(approval['issued_at']), _time(approval['expires_at'])

@@ -23,16 +23,16 @@ class SourceApprovalTests(unittest.TestCase):
         self.bundle.write_bytes(b'mocked bundle, not a signature')
         self.now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
         self.trust = {'identity': 'https://github.com/rootloom/base-images/.github/workflows/quality.yml@refs/heads/main',
-                      'workflow_sha': 'b' * 40, 'run_id': '200', 'run_attempt': '1'}
+                      'workflow_sha': 'b' * 40, 'run_id': '200', 'run_attempt': '1', 'actor_id': 2000}
         self.expected = {'repository': 'rootloom/base-images', 'source_commit': 'a' * 40,
                          'producer': {'identity': 'https://github.com/rootloom/base-images/.github/workflows/source-release.yml@refs/heads/main',
-                                      'workflow_sha': 'a' * 40, 'run_id': '100', 'run_attempt': '2'},
+                                      'workflow_sha': 'a' * 40, 'run_id': '100', 'run_attempt': '2', 'actor_id': 1000},
                          'image': 'ghcr.io/rootloom/source-minimal', 'index_digest': 'sha256:' + 'c' * 64,
                          'platforms': {'amd64': 'sha256:' + 'd' * 64, 'arm64': 'sha256:' + 'e' * 64},
                          'evidence': {name: 'f' * 64 for name in approval.REQUIRED_EVIDENCE}, 'variant': 'standard'}
         for arch in ('amd64', 'arm64'):
             self.expected['evidence'].update({arch + suffix: 'f' * 64 for suffix in approval.PLATFORM_EVIDENCE})
-        self.record = {'schema_version': 1, 'candidate': copy.deepcopy(self.expected),
+        self.record = {'schema_version': 2, 'candidate': copy.deepcopy(self.expected),
                        'approver': copy.deepcopy(self.trust), 'issued_at': '2026-10-11T11:00:00Z',
                        'expires_at': '2026-10-11T13:00:00Z',
                        'results': {arch: {check: 'passed' for check in approval.REQUIRED_CHECKS} for arch in ('amd64', 'arm64')}}
@@ -87,8 +87,9 @@ class SourceApprovalTests(unittest.TestCase):
                     self.validate()
                 self.record = record
 
-    def test_producer_sha_run_attempt_and_workflow_mismatches(self):
-        for field, value in [('workflow_sha', '0' * 40), ('run_id', '101'), ('run_attempt', '3'), ('identity', self.trust['identity'])]:
+    def test_producer_binding_mismatches(self):
+        for field, value in [('workflow_sha', '0' * 40), ('run_id', '101'), ('run_attempt', '3'),
+                             ('identity', self.trust['identity']), ('actor_id', 1001)]:
             with self.subTest(field=field):
                 record = copy.deepcopy(self.record)
                 self.record['candidate']['producer'][field] = value
@@ -100,7 +101,7 @@ class SourceApprovalTests(unittest.TestCase):
         for field in self.trust:
             with self.subTest(field=field):
                 record = copy.deepcopy(self.record)
-                self.record['approver'][field] += '1'
+                self.record['approver'][field] += 1 if field == 'actor_id' else '1'
                 with self.assertRaises(ValueError):
                     self.validate()
                 self.record = record
@@ -114,6 +115,38 @@ class SourceApprovalTests(unittest.TestCase):
                     self.validate()
                 self.runner.assert_not_called()
                 self.trust = trust
+
+    def test_producer_actor_cannot_approve_from_a_different_workflow_and_run(self):
+        self.trust['actor_id'] = self.expected['producer']['actor_id']
+        self.record['approver'] = copy.deepcopy(self.trust)
+        with self.assertRaisesRegex(ValueError, 'producer actor'):
+            self.validate()
+        self.runner.assert_not_called()
+
+    def test_missing_or_malformed_trusted_actor_ids_rejected(self):
+        for binding in (self.expected['producer'], self.trust):
+            with self.subTest(binding=binding['run_id']):
+                actor_id = binding.pop('actor_id')
+                with self.assertRaisesRegex(ValueError, 'Incomplete workflow binding'):
+                    self.validate()
+                for value in (str(actor_id), True, 0, -1):
+                    binding['actor_id'] = value
+                    with self.assertRaisesRegex(ValueError, 'Invalid GitHub actor ID'):
+                        self.validate()
+                binding['actor_id'] = actor_id
+        self.runner.assert_not_called()
+
+    def test_signed_actor_id_must_be_an_exact_integer(self):
+        for name, binding in (('producer', self.record['candidate']['producer']),
+                              ('approver', self.record['approver'])):
+            with self.subTest(binding=name):
+                actor_id = binding['actor_id']
+                binding['actor_id'] = float(actor_id)
+                self.runner.reset_mock()
+                with self.assertRaisesRegex(ValueError, 'Invalid GitHub actor ID'):
+                    self.validate()
+                self.runner.assert_called_once()
+                binding['actor_id'] = actor_id
 
     def test_untrusted_identity_and_malformed_run_rejected(self):
         for field, value in [('identity', 'https://github.com/attacker/repo/.github/workflows/quality.yml@refs/heads/main'),

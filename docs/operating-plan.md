@@ -23,6 +23,13 @@ The reviewer must not approve a candidate they built. A team message does not co
 Use an isolated branch or checkout when the shared checkout contains unfinished work. Do not include someone else's unpublished changes.
 Use normal GitHub pull requests. Do not bypass branch protections, change organization access, or start recurring work as part of routine integration.
 
+## Continue After A Run
+
+Treat the factory report as a handoff, not the end of the work.
+Record the owner, exact commit or digest, observed checks, and next action for each open item.
+Start the next authorized action. If one item needs approval, continue work on an independent item.
+Keep task limits in force until the assignment ends. Routine integration does not authorize release promotion or a new factory run.
+
 ## Stage Source Updates
 
 1. Record the upstream version or commit, origin, license, and expected checksum from reviewed upstream evidence.
