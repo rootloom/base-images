@@ -87,8 +87,9 @@ class SourceApprovalTests(unittest.TestCase):
                     self.validate()
                 self.record = record
 
-    def test_producer_sha_run_attempt_and_workflow_mismatches(self):
-        for field, value in [('workflow_sha', '0' * 40), ('run_id', '101'), ('run_attempt', '3'), ('identity', self.trust['identity'])]:
+    def test_producer_binding_mismatches(self):
+        for field, value in [('workflow_sha', '0' * 40), ('run_id', '101'), ('run_attempt', '3'),
+                             ('identity', self.trust['identity']), ('actor_id', 1001)]:
             with self.subTest(field=field):
                 record = copy.deepcopy(self.record)
                 self.record['candidate']['producer'][field] = value
@@ -136,10 +137,16 @@ class SourceApprovalTests(unittest.TestCase):
         self.runner.assert_not_called()
 
     def test_signed_actor_id_must_be_an_exact_integer(self):
-        self.record['approver']['actor_id'] = float(self.trust['actor_id'])
-        with self.assertRaisesRegex(ValueError, 'Invalid GitHub actor ID'):
-            self.validate()
-        self.runner.assert_called_once()
+        for name, binding in (('producer', self.record['candidate']['producer']),
+                              ('approver', self.record['approver'])):
+            with self.subTest(binding=name):
+                actor_id = binding['actor_id']
+                binding['actor_id'] = float(actor_id)
+                self.runner.reset_mock()
+                with self.assertRaisesRegex(ValueError, 'Invalid GitHub actor ID'):
+                    self.validate()
+                self.runner.assert_called_once()
+                binding['actor_id'] = actor_id
 
     def test_untrusted_identity_and_malformed_run_rejected(self):
         for field, value in [('identity', 'https://github.com/attacker/repo/.github/workflows/quality.yml@refs/heads/main'),
