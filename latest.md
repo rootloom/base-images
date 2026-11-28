@@ -81,6 +81,6 @@ Reports cover known vulnerabilities at scan time. Older digests are not rescanne
 ### source-minimal
 
 - Live index digest: `unknown`
-- Last attempt qualification: blocked, 2026-11-28T04:18:22.200130+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/source-source-minimal-46106824325-1)
+- Last attempt qualification: blocked, 2026-11-28T13:49:20.191091+00:00. [Evidence](https://github.com/rootloom/base-images/releases/tag/source-source-minimal-46149607544-1)
 - Latest tag could not be read. Do not treat missing data as zero CVEs.
 - Coverage: NVD-CPE component matching only; not distribution advisory coverage
